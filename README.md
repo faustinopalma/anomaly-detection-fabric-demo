@@ -37,10 +37,6 @@ until it expires.
 ├── .env.example              # template; copy to .env (gitignored)
 ├── .gitignore
 ├── README.md
-├── items/
-│   └── ingest.Notebook/      # notebook definition imported into the workspace
-│       ├── .platform
-│       └── notebook-content.py
 └── scripts/
     ├── deploy.ps1            # main entrypoint
     └── lib/
@@ -50,26 +46,30 @@ until it expires.
 
 ## What the script creates
 
-| Item                | Name (default)         | Notes                                              |
-|---------------------|------------------------|----------------------------------------------------|
-| Workspace           | `$FABRIC_WORKSPACE_NAME` | Assigned to `$FABRIC_CAPACITY_NAME`              |
-| Lakehouse           | `bronze`               | Empty, schema-enabled default                      |
-| Notebook            | `ingest`               | Imported from `items/ingest.Notebook/`             |
-| Data Pipeline       | `daily_load`           | Empty pipeline (edit in the portal or via import)  |
-| Eventhouse          | `telemetry`            | Hosts the KQL database                             |
-| KQL Database        | `signals`              | Inside the `telemetry` Eventhouse                  |
+All items are created **blank** — fill them in via the Fabric portal or a
+follow-up import.
 
-The script is **idempotent**: re-running it updates existing items instead of
-failing.
+| Item          | Default name      | Notes                                |
+|---------------|-------------------|--------------------------------------|
+| Workspace     | `$FABRIC_WORKSPACE_NAME` | Assigned to `$FABRIC_CAPACITY_NAME` |
+| Lakehouse     | `lakehouse1`      |                                      |
+| Notebook      | `notebook1`       | Empty notebook                       |
+| Data Pipeline | `pipeline1`       | Empty pipeline                       |
+| Eventhouse    | `eventhouse1`     | Hosts the KQL database               |
+| KQL Database  | `kqldb1`          | Inside `eventhouse1`                 |
+
+The script is **idempotent**: re-running it skips items that already exist.
 
 ## Adding more items
 
-Drop a definition folder under `items/<name>.<ItemType>/` and add a line in
-`scripts/deploy.ps1`:
+Add a line in `scripts/deploy.ps1`, e.g.:
 
 ```powershell
-Import-FabricItem -Workspace $ws -Path "items/my_model.SemanticModel"
+New-FabricItem -Workspace $ws -Name 'my_model' -Type SemanticModel
 ```
+
+To import an item from a local definition folder, create `items/<name>.<Type>/`
+and call `Import-FabricItem -Workspace $ws -Path 'items/<name>.<Type>'`.
 
 ## CI / non-interactive use
 

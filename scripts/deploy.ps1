@@ -53,23 +53,15 @@ $ws = New-FabricWorkspace `
 Write-Host "Provisioning items in $ws..." -ForegroundColor Cyan
 
 New-FabricItem -Workspace $ws -Name $env:FABRIC_LAKEHOUSE_NAME -Type Lakehouse    | Out-Null
+New-FabricItem -Workspace $ws -Name $env:FABRIC_NOTEBOOK_NAME  -Type Notebook     | Out-Null
 New-FabricItem -Workspace $ws -Name $env:FABRIC_PIPELINE_NAME  -Type DataPipeline | Out-Null
 
 # Eventhouse first; KQL database is nested inside it.
-$ehPath = New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME -Type Eventhouse
+New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME -Type Eventhouse | Out-Null
 New-FabricItem `
     -Workspace $ws `
     -Name      $env:FABRIC_KQLDB_NAME `
     -Type      KQLDatabase `
     -Params    @{ parentEventhouseName = $env:FABRIC_EVENTHOUSE_NAME } | Out-Null
-
-# Notebook: import a definition folder so the code is in source control.
-$notebookSrc = Join-Path $PSScriptRoot '..' 'items' "$($env:FABRIC_NOTEBOOK_NAME).Notebook"
-if (Test-Path $notebookSrc) {
-    Import-FabricItem -Workspace $ws -Path $notebookSrc | Out-Null
-} else {
-    Write-Host "  No notebook definition at $notebookSrc - creating empty notebook." -ForegroundColor Yellow
-    New-FabricItem -Workspace $ws -Name $env:FABRIC_NOTEBOOK_NAME -Type Notebook | Out-Null
-}
 
 Write-Host "`nDone. Workspace ready: $ws" -ForegroundColor Green
