@@ -10,21 +10,25 @@ function Assert-FabCli {
 
 function Invoke-Fab {
     # Runs `fab` and throws if exit code is non-zero. Returns stdout lines.
-    param([Parameter(ValueFromRemainingArguments = $true)] [string[]]$Args)
+    # Arguments must be passed as a single array to avoid PowerShell's
+    # automatic parameter binding (e.g. -P clashing with -PipelineVariable).
+    param([Parameter(Mandatory)][string[]]$FabArgs)
 
-    Write-Host "  > fab $($Args -join ' ')" -ForegroundColor DarkGray
-    $output = & fab @Args 2>&1
+    Write-Host "  > fab $($FabArgs -join ' ')" -ForegroundColor DarkGray
+    $output = & fab @FabArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         $output | ForEach-Object { Write-Host $_ -ForegroundColor Red }
-        throw "fab $($Args -join ' ') failed with exit code $LASTEXITCODE"
+        throw "fab $($FabArgs -join ' ') failed with exit code $LASTEXITCODE"
     }
     return $output
 }
 
 function Test-FabPath {
     param([Parameter(Mandatory)][string]$Path)
-    $null = & fab exists $Path 2>&1
-    return ($LASTEXITCODE -eq 0)
+    # `fab exists` always exits 0 and prints something like "* true" / "* false"
+    # (the leading "* " is a TTY marker stripped when stdout is captured).
+    $out = & fab exists $Path 2>&1 | Out-String
+    return ($out -match '(?im)^\s*(\*\s*)?true\s*$')
 }
 
 function New-FabricWorkspace {
@@ -38,7 +42,7 @@ function New-FabricWorkspace {
         Write-Host "Workspace '$Name' already exists - skipping create." -ForegroundColor Yellow
     } else {
         Write-Host "Creating workspace '$Name' on capacity '$CapacityName'..." -ForegroundColor Cyan
-        Invoke-Fab create $wsPath -P "capacityName=$CapacityName" | Out-Null
+        Invoke-Fab -FabArgs @('create', $wsPath, '-P', "capacityName=$CapacityName") | Out-Null
     }
     return $wsPath
 }
@@ -67,7 +71,7 @@ function New-FabricItem {
         $pairs = $Params.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }
         $argList += @('-P', ($pairs -join ','))
     }
-    Invoke-Fab @argList | Out-Null
+    Invoke-Fab -FabArgs $argList | Out-Null
     return $itemPath
 }
 
@@ -84,6 +88,6 @@ function Import-FabricItem {
     $remotePath = "$Workspace/$leaf"
 
     Write-Host "  Importing $leaf from $Path..." -ForegroundColor Cyan
-    Invoke-Fab import $remotePath -i $Path -f | Out-Null
+    Invoke-Fab -FabArgs @('import', $remotePath, '-i', $Path, '-f') | Out-Null
     return $remotePath
 }

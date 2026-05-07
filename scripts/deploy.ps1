@@ -55,8 +55,18 @@ Assert-EnvVars @(
 )
 
 # --- Authenticate (device code) ------------------------------------------
-Write-Host "Authenticating to Fabric (device code)..." -ForegroundColor Cyan
-Invoke-Fab auth login --tenant $env:FABRIC_TENANT_ID | Out-Null
+# Skip if already authenticated; `fab auth login` requires an interactive
+# console (Windows broker) and will fail otherwise.
+$authStatus = & fab auth status 2>&1
+if ($LASTEXITCODE -eq 0 -and ($authStatus -match 'Logged in')) {
+    Write-Host "Already authenticated to Fabric - skipping login." -ForegroundColor DarkGray
+} else {
+    Write-Host "Authenticating to Fabric (interactive)..." -ForegroundColor Cyan
+    & fab auth login --tenant $env:FABRIC_TENANT_ID
+    if ($LASTEXITCODE -ne 0) {
+        throw "fab auth login failed. Run it manually in a regular terminal first: fab auth login --tenant $env:FABRIC_TENANT_ID"
+    }
+}
 
 # --- Workspace -----------------------------------------------------------
 $ws = New-FabricWorkspace `
@@ -81,21 +91,18 @@ New-FabricItem `
 New-FabricItem -Workspace $ws -Name $env:FABRIC_LAKEHOUSE_NAME   -Type Lakehouse   | Out-Null
 New-FabricItem -Workspace $ws -Name $env:FABRIC_ENVIRONMENT_NAME -Type Environment | Out-Null
 
-# Notebooks: prefer importing from items/<name>.Notebook/ if present -------
+# Notebooks: created blank. Source content for each is checked in under
+# items/<name>.Notebook/notebook-content.py and is intended to be loaded
+# either via Fabric Git integration (recommended) or pasted into the
+# notebook in the Fabric portal. `fab import` of the Git source format
+# (.py) is not supported - it expects .ipynb JSON.
 $notebookNames = @(
     $env:FABRIC_NOTEBOOK_FEATURES_NAME,
     $env:FABRIC_NOTEBOOK_TRAIN_NAME,
     $env:FABRIC_NOTEBOOK_REGISTER_NAME
 )
-$itemsRoot = Join-Path $PSScriptRoot '..' 'items'
 foreach ($nb in $notebookNames) {
-    $src = Join-Path $itemsRoot "$nb.Notebook"
-    if (Test-Path $src) {
-        Import-FabricItem -Workspace $ws -Path $src | Out-Null
-    } else {
-        Write-Host "  No definition at $src - creating empty notebook." -ForegroundColor Yellow
-        New-FabricItem -Workspace $ws -Name $nb -Type Notebook | Out-Null
-    }
+    New-FabricItem -Workspace $ws -Name $nb -Type Notebook | Out-Null
 }
 
 # Orchestration + alerting + BI --------------------------------------------
