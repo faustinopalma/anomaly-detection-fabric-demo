@@ -1,0 +1,24 @@
+// 02_models.kql
+// Versioned ONNX model registry inside the KQL database.
+// The training notebook uploads the serialized ONNX bytes here.
+
+.create-merge table models (
+    name        : string,            // e.g. "univariate_ae", "multivariate_iforest"
+    version     : int,
+    created_at  : datetime,
+    framework   : string,            // "onnx"
+    window_size : int,               // number of timesteps the model expects
+    sensors     : dynamic,           // list of sensor_ids (null/empty for univariate)
+    payload     : string,            // base64-encoded ONNX bytes (<= ~1 GB sandbox limit)
+    metadata    : dynamic            // free-form: training metrics, threshold, scaler params, ...
+)
+
+.alter-merge table models policy retention softdelete = 3650d
+
+// Helper: latest version of a given model name.
+.create-or-alter function with (folder='models', docstring='Returns the latest row of a given model name')
+    latest_model(model_name:string) {
+    models
+    | where name == model_name
+    | top 1 by version desc
+}

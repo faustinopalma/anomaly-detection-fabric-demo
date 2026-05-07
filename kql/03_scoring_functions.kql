@@ -1,0 +1,155 @@
+// 03_scoring_functions.kql
+// Stored functions that build sliding windows and call the ONNX model
+// in-process via the python() plugin.
+//
+// Prerequisites
+// -------------
+// * The python() language plugin must be enabled on the Eventhouse.
+//   Ask a workspace/cluster admin if it is not.
+// * Models must already exist in the `models` table (uploaded by the
+//   training notebook) with name = model_name and a valid base64 ONNX
+//   payload.
+
+// ---------------------------------------------------------------------------
+// build_univariate_windows
+//   For one sensor of one machine, produce non-overlapping fixed-size
+//   windows of length `window_size` ending at or before `until`.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Build fixed-length windows for a single (machine, sensor)')
+    build_univariate_windows(
+        machine:string, sensor:string,
+        window_size:int, lookback:timespan, until:datetime = datetime(null)
+    ) {
+    let _until = iff(isnull(until), now(), until);
+    raw_telemetry
+    | where machine_id == machine and sensor_id == sensor
+    | where ts between (_until - lookback .. _until)
+    | order by ts asc
+    | extend rn = row_number() - 1
+    | extend win_id = rn / window_size
+    | summarize
+        window_start = min(ts),
+        window_end   = max(ts),
+        values       = make_list(value)
+        by machine_id, sensor_id, win_id
+    | where array_length(values) == window_size
+    | project-away win_id
+}
+
+// ---------------------------------------------------------------------------
+// score_univariate_onnx
+//   Pass each window through the latest ONNX model named `model_name`.
+//   The model must accept input shape [batch, window_size, 1] (float32)
+//   and return a 1-D anomaly score per row.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Score univariate windows with an ONNX model')
+    score_univariate_onnx(
+        model_name:string, machine:string, sensor:string,
+        window_size:int, lookback:timespan, threshold:real
+    ) {
+    let model_row = toscalar(latest_model(model_name) | project payload);
+    let model_ver = toscalar(latest_model(model_name) | project version);
+    build_univariate_windows(machine, sensor, window_size, lookback)
+    | extend model_b64 = model_row
+    | evaluate python(
+        typeof(*, score:real),
+        ```
+        import base64, io, numpy as np, onnxruntime as ort
+        b64 = df['model_b64'].iloc[0]
+        sess = ort.InferenceSession(base64.b64decode(b64))
+        input_name = sess.get_inputs()[0].name
+        X = np.stack(df['values'].values).astype(np.float32)
+        X = X.reshape(X.shape[0], X.shape[1], 1)
+        out = sess.run(None, {input_name: X})[0].reshape(-1)
+        result = df.copy()
+        result['score'] = out
+        result
+        ```
+    )
+    | project-away model_b64
+    | extend
+        model_name    = model_name,
+        model_version = model_ver,
+        is_anomaly    = score > threshold,
+        detected_at   = now()
+}
+
+// ---------------------------------------------------------------------------
+// build_multivariate_windows
+//   For one machine, produce windows aligned across multiple sensors.
+//   Output `values` is a 2-D dynamic array shaped [window_size, n_sensors].
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Build aligned multi-sensor windows for one machine')
+    build_multivariate_windows(
+        machine:string, sensors:dynamic,
+        window_size:int, bin:timespan, lookback:timespan, until:datetime = datetime(null)
+    ) {
+    let _until = iff(isnull(until), now(), until);
+    raw_telemetry
+    | where machine_id == machine and sensor_id in (sensors)
+    | where ts between (_until - lookback .. _until)
+    | summarize avg_value = avg(value)
+        by bin = bin(ts, bin), machine_id, sensor_id
+    | order by bin asc
+    | summarize sensor_values = make_bag(pack(sensor_id, avg_value))
+        by bin, machine_id
+    | extend rn = row_number() - 1
+    | extend win_id = rn / window_size
+    | summarize
+        window_start = min(bin),
+        window_end   = max(bin),
+        rows         = make_list(sensor_values)
+        by machine_id, win_id
+    | where array_length(rows) == window_size
+    | extend values = rows  // training notebook agrees on sensor order via metadata
+    | project-away win_id, rows
+}
+
+// ---------------------------------------------------------------------------
+// score_multivariate_onnx
+//   Score multivariate windows with an ONNX model.
+//   The model must accept input shape [batch, window_size, n_sensors] float32.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Score multivariate windows with an ONNX model')
+    score_multivariate_onnx(
+        model_name:string, machine:string,
+        bin:timespan, lookback:timespan, threshold:real
+    ) {
+    let m         = latest_model(model_name);
+    let model_b64 = toscalar(m | project payload);
+    let model_ver = toscalar(m | project version);
+    let win_size  = toint(toscalar(m | project window_size));
+    let sensors   = toscalar(m | project sensors);
+    build_multivariate_windows(machine, sensors, win_size, bin, lookback)
+    | extend model_b64 = model_b64, sensors = sensors
+    | evaluate python(
+        typeof(*, score:real),
+        ```
+        import base64, numpy as np, onnxruntime as ort
+        b64 = df['model_b64'].iloc[0]
+        sensors = list(df['sensors'].iloc[0])
+        sess = ort.InferenceSession(base64.b64decode(b64))
+        input_name = sess.get_inputs()[0].name
+        batch = []
+        for row in df['values']:
+            mat = np.array([[step.get(s, 0.0) for s in sensors] for step in row],
+                            dtype=np.float32)
+            batch.append(mat)
+        X = np.stack(batch)  # [batch, window, n_sensors]
+        out = sess.run(None, {input_name: X})[0].reshape(-1)
+        result = df.copy()
+        result['score'] = out
+        result
+        ```
+    )
+    | project-away model_b64, sensors
+    | extend
+        model_name    = model_name,
+        model_version = model_ver,
+        is_anomaly    = score > threshold,
+        detected_at   = now()
+}

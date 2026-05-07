@@ -1,0 +1,49 @@
+// 01_tables.kql
+// Core tables for the factory anomaly-detection demo.
+// Run against the KQL Database (kql-telemetry) once after deployment.
+
+// ---------------------------------------------------------------------------
+// Raw telemetry: one row per (machine, sensor, timestamp).
+// Eventstream writes here directly.
+// ---------------------------------------------------------------------------
+.create-merge table raw_telemetry (
+    machine_id : string,
+    sensor_id  : string,
+    ts         : datetime,
+    value      : real,
+    quality    : int,                 // 0=bad, 192=good (OPC-UA convention)
+    ingest_ts  : datetime
+)
+
+.alter-merge table raw_telemetry policy retention softdelete = 30d
+
+// Optional: schema-on-read JSON mapping for Eventstream ingestion.
+.create-or-alter table raw_telemetry ingestion json mapping 'raw_telemetry_json'
+```
+[
+  { "column": "machine_id", "path": "$.machineId" },
+  { "column": "sensor_id",  "path": "$.sensorId"  },
+  { "column": "ts",         "path": "$.ts"        },
+  { "column": "value",      "path": "$.value"     },
+  { "column": "quality",    "path": "$.quality"   },
+  { "column": "ingest_ts",  "transform": "SourceLineNumber" }
+]
+```
+
+// ---------------------------------------------------------------------------
+// Anomalies: produced by the scoring function via update policy.
+// ---------------------------------------------------------------------------
+.create-merge table anomalies (
+    detected_at  : datetime,
+    machine_id   : string,
+    sensor_id    : string,           // null for multivariate models
+    window_start : datetime,
+    window_end   : datetime,
+    model_name   : string,
+    model_version: int,
+    score        : real,             // anomaly score returned by the model
+    is_anomaly   : bool,
+    payload      : dynamic           // full window + extra context for debugging
+)
+
+.alter-merge table anomalies policy retention softdelete = 365d

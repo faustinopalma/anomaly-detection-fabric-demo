@@ -49,7 +49,8 @@ function New-FabricItem {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][ValidateSet(
             'Lakehouse','Notebook','DataPipeline','Eventhouse','KQLDatabase',
-            'Warehouse','SemanticModel','Report','Environment'
+            'KQLQueryset','Eventstream','Reflex',
+            'Warehouse','SemanticModel','Report','Environment','MLModel','MLExperiment'
         )][string]$Type,
         [hashtable]$Params
     )
