@@ -1,0 +1,30 @@
+# Local environment
+.env
+.env.*.local
+
+# Fabric CLI cache / token store
+.fab/
+**/.fabric/
+
+# Logs
+*.log
+logs/
+
+# PowerShell
+*.ps1.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+
+# Python (in case notebooks pull deps locally)
+__pycache__/
+*.pyc
+.venv/
+venv/
