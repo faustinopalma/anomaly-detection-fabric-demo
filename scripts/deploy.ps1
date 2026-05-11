@@ -112,4 +112,12 @@ New-FabricItem -Workspace $ws -Name $env:FABRIC_SEMANTIC_MODEL_NAME -Type Semant
 New-FabricItem -Workspace $ws -Name $env:FABRIC_REPORT_NAME         -Type Report        | Out-Null
 
 Write-Host "`nDone. Workspace ready: $ws" -ForegroundColor Green
-Write-Host "Next: run the KQL scripts in ./kql against $($env:FABRIC_KQLDB_NAME) and wire the Eventstream sources/destinations in the portal. See docs/architecture.md." -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Cyan
+Write-Host "  1. Add a CustomEndpoint source to the eventstream and write its" -ForegroundColor Cyan
+Write-Host "     connection string into .env (no portal needed):" -ForegroundColor Cyan
+Write-Host "         python tools/setup_eventstream_endpoint.py" -ForegroundColor Yellow
+Write-Host "  2. Start the telemetry simulator:" -ForegroundColor Cyan
+Write-Host "         python tools/simulate_machines.py" -ForegroundColor Yellow
+Write-Host "  3. Run the KQL scripts in ./kql against $($env:FABRIC_KQLDB_NAME)" -ForegroundColor Cyan
+Write-Host "     and wire any remaining destinations. See docs/architecture.md." -ForegroundColor Cyan

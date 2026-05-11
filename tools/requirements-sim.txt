@@ -1,2 +1,4 @@
 azure-eventhub>=5.12.0
+azure-identity>=1.17.0
+requests>=2.32.0
 python-dotenv>=1.0.1
