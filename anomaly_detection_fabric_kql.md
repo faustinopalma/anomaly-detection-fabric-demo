@@ -40,6 +40,8 @@ Required only for custom scenarios (not for native functions). The plugin is **d
 
 `Eventhouse > Plugins > Python language extension: On`
 
+> ⚠️ **In Microsoft Fabric you also have to enable it on every KQL Database you actually query**, not just at the Eventhouse level. When you create an Eventhouse Fabric provisions both the Eventhouse-level item and an auto-generated default KQL database (e.g. `kql_telemetry_auto`); flipping the toggle at the Eventhouse level does NOT cascade. Open each KQL DB and enable the Python plugin from its own settings, otherwise `evaluate python(...)` calls return *"plugin 'python' is disabled"* even though the Eventhouse shows it as on.
+
 Available images today:
 
 - **Python 3.10.8** + standard data-science / ML packages (numpy, pandas, scikit-learn, statsmodels, scipy, …)
