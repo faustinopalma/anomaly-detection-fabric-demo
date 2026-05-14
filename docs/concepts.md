@@ -253,13 +253,17 @@ recent normal scores). Above the threshold → row goes into `anomalies`.
 
 ---
 
-## 9. Window-based models need history that a single batch doesn't have
+## 9. Window-based models need a small slice of history across batch boundaries
 
 The autoencoder needs **64 contiguous samples for the same (machine,
-sensor)** to score one window. By default the update policy only shows the
-function the rows of the **batch that just arrived**, which is far too
-little data to build that window. This section explains why, and how we
-solve it cleanly.
+sensor)** to score one window. With a properly sized batch (~1 minute,
+hundreds of samples per sensor — see the `ingestionbatching` policy
+below) most windows are built entirely from the new batch. The only
+windows that need extra care are the ones that **straddle the boundary**
+between this batch and the previous one: their first ~63 samples landed
+earlier and only the last sample arrives now. This section explains
+how the engine sees the data, why those boundary windows matter, and
+how we stitch them back without scanning history on every batch.
 
 When the engine fires the update policy, it doesn't run the function
 "as written". It transparently injects a filter so that, inside the
