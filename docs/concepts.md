@@ -375,7 +375,71 @@ deployment, no restart, no service.
 
 ---
 
-## 12. Summary — the design decisions in one place
+## 12. The multivariate variant — same idea, wider input
+
+Everything above is described for one sensor at a time (univariate). The
+repo also ships a **multivariate** model that watches **all 8 sensors of a
+machine jointly** and emits one anomaly score per window. The mental model
+is identical — train an autoencoder on normal windows, score the
+reconstruction error, threshold it — but two pieces have to be added.
+
+### 12.1 A wide "shape" of the data, maintained for free
+
+The scoring function needs to see all sensors of one machine on the same
+row at the same instant. Computing that pivot inside the update policy on
+every batch would be wasteful, so we let Eventhouse maintain it for us
+with a **materialized view** (`raw_telemetry_wide_mv`):
+
+| ts_bin              | machine_id | temperature_motor | vibration_radial | current | … |
+|---------------------|------------|-------------------|------------------|---------|---|
+| 11:24:00            | M-001      | 62.31             | 0.42             | 11.7    | … |
+| 11:24:01            | M-001      | 62.40             | 0.41             | 11.6    | … |
+
+One row per `(machine_id, ts_bin = 1s)`, one column per sensor. The MV is
+updated on every ingest into `raw_telemetry`, costs ~1× storage thanks to
+bin-row reconciliation, and gives the multivariate scoring function its
+input in the right shape with no run-time work.
+
+### 12.2 A second update policy on the same `anomalies` table
+
+Multiple update policies can target the same destination table. The repo
+attaches a second one alongside the univariate scorer; rows are
+distinguished downstream by `model_name` (`univariate_ae__*` vs
+`multivariate_ae__*`). One alert table, several model families, one
+Reflex.
+
+### 12.3 Two practical wrinkles worth knowing
+
+- **Per-feature normalization is baked into the ONNX graph.** The
+  multivariate notebook fits per-feature `mean` and `std` and stores them
+  as constant buffers in a tiny `NormalizedScoreWrapper` layer of the ONNX
+  export. This means the KQL function passes raw sensor values from the
+  MV — no scaler step in the function, no risk of train/score drift if
+  somebody forgets to keep the two in sync.
+- **An anchor-sensor dedup filter avoids firing the policy 8× per batch.**
+  A long table with N sensors per machine generates N rows per `ts_bin`
+  per machine. Without care, the multivariate update policy would fire ~N×
+  on every ingest. The function therefore checks that the new batch
+  contains at least one row of an *anchor sensor* (here
+  `temperature_motor`) before producing any output. With 8 sensors this
+  divides the scoring rate by ~8 without losing any window. The trade-off:
+  if the anchor sensor stops reporting, multivariate scoring stops too —
+  pick a sensor that's guaranteed to be present, or move to a small
+  routing table for production.
+
+### 12.4 Threshold lives with the model, not with the function
+
+For the univariate model the threshold is a literal in `fn_score_demo()`
+(`threshold = 3870.0`); calibration means redeploying the function. For
+the multivariate model the threshold is computed at training time as
+`mean(loss) + K · std(loss)` (with `K = 4` on normalized features) and
+stored in `metadata.threshold` of the model row. The KQL scoring function
+reads it from there — retraining is enough to re-calibrate, no KQL
+redeploy needed.
+
+---
+
+## 13. Summary — the design decisions in one place
 
 | Decision | Why |
 |---|---|
@@ -389,10 +453,14 @@ deployment, no restart, no service.
 | Explicit `ingestionbatching` policy on `raw_telemetry` | Pin batch cadence (~1 min) so each batch contains enough samples per (machine, sensor) for full windows |
 | Reflex on `anomalies` | Native, code-free way to turn rows into Teams/email/automation |
 | Native KQL anomaly functions kept as a fallback | Cover the easy 80% with zero ML work |
+| **Multivariate**: wide materialized view fed by `raw_telemetry` | One pivot maintained for free, no run-time pivot in the policy |
+| **Multivariate**: per-feature normalization baked into the ONNX graph | KQL stays stateless; no train/score skew |
+| **Multivariate**: threshold stored in the model's `metadata` | Retraining is enough to recalibrate; no KQL redeploy |
+| **Multivariate**: anchor-sensor dedup in the entry-point function | Update policy fires ~1× per batch instead of N× (one per sensor row) |
 
 ---
 
-## 13. What you would change in production
+## 14. What you would change in production
 
 This repo is a demo. In a real deployment you would typically:
 
@@ -402,12 +470,17 @@ This repo is a demo. In a real deployment you would typically:
   `machines_dim` master table to attach machine type, line, plant, etc.
   (See `data_modeling_industrial_measures.md`.)
 - Calibrate the **threshold per machine** (and re-calibrate on a schedule)
-  rather than using a single global value.
+  rather than using a single global value. The multivariate model already
+  stores its threshold in metadata — extend the same convention to the
+  univariate scorer.
 - Track each model version in **MLflow** for proper lineage.
 - Deduplicate in the scoring function rather than at query time.
 - Add a **retention policy** (e.g. 90 days hot, longer cold) on
   `raw_telemetry`, and a separate one on `anomalies`.
 - Hook Reflex into a **ticketing system** (ServiceNow, Jira) instead of
   just Teams, so anomalies become trackable work items.
+- Replace the single anchor-sensor dedup with a small helper function
+  that picks the densest sensor per `(machine, batch)` so multivariate
+  scoring is robust to single-sensor outages.
 
 None of these change the architecture; they just harden it.

@@ -21,16 +21,17 @@ The end-to-end flow is the same regardless of the algorithm:
 │ Machines     │───>│ Eventstream│───>│ measures_raw     │───>│ anomalies    │───>│ Activator │
 │ OPC-UA / MQTT│    │            │    │ (Eventhouse)     │    │ (Eventhouse) │    │ (Reflex)  │
 └──────────────┘    └────────────┘    │  + update policy │    └──────────────┘    └───────────┘
-                                      └──────────────────┘                              │
-                                                                                        v
+                                      │  +/- wide MV     │                              │
+                                      └──────────────────┘                              v
                                                                               Email / Teams / Webhook
 ```
 
 **Components:**
 
 - **Eventstream** — brings process data into Eventhouse (Event Hubs, IoT Hub, MQTT, Kafka, custom app).
-- **`measures_raw`** — landing table in Eventhouse with raw samples.
-- **Update policy** — KQL function that, on each new ingested batch, applies the model and writes only anomalous rows into `anomalies`.
+- **`measures_raw`** — landing table in Eventhouse with raw samples (long format: one row per measurement).
+- **(Optional) wide materialized view** — auto-maintained on each ingest; pivots `measures_raw` into one row per `(machine_id, ts_bin)` with one column per sensor. Required only for multivariate scoring — see §4.6.
+- **Update policy** — KQL function that, on each new ingested batch, applies the model and writes only anomalous rows into `anomalies`. Multiple update policies can coexist on the same target table (e.g. one per model family).
 - **`anomalies`** — table of detected anomalies (model input/output).
 - **Activator (Reflex)** — watches `anomalies` and fires notifications.
 
@@ -527,6 +528,160 @@ with open("/lakehouse/default/Files/iforest.onnx", "wb") as f:
 
 In KQL, use `external_artifacts` pointing at the ONNX file and load it with `onnxruntime` inside the sandbox.
 
+### 4.6 Pattern: multivariate scoring over a wide materialized view (production pattern in this repo)
+
+This is the pattern actually deployed by `kql/05_multivariate_mv.kql` and
+used by `notebooks/05_train_multivariate_ae.ipynb`. It scores a per-machine
+LSTM autoencoder over **all sensors of a machine jointly** without any
+run-time pivot.
+
+**Idea.** Instead of joining and pivoting `measures_raw` (long) inside the
+scoring function on every batch, maintain a **materialized view** that
+holds the wide shape, then have the scoring function read from the MV.
+The MV is updated by Eventhouse automatically on each ingest — no batch
+job to schedule, no double-write to keep in sync.
+
+```kusto
+.create-or-alter materialized-view raw_telemetry_wide_mv on table raw_telemetry
+{
+    raw_telemetry
+    | summarize
+        temperature_motor    = avgif(value, sensor_id == 'temperature_motor'),
+        temperature_bearing  = avgif(value, sensor_id == 'temperature_bearing'),
+        vibration_axial      = avgif(value, sensor_id == 'vibration_axial'),
+        vibration_radial     = avgif(value, sensor_id == 'vibration_radial'),
+        current              = avgif(value, sensor_id == 'current'),
+        power                = avgif(value, sensor_id == 'power'),
+        spindle_rpm          = avgif(value, sensor_id == 'spindle_rpm'),
+        pressure_hydraulic   = avgif(value, sensor_id == 'pressure_hydraulic')
+        by ts_bin = bin(ts, 1s), machine_id
+}
+```
+
+Why this is cheap: Eventhouse reconciles partial bin rows from successive
+batches automatically (the MV stores deltas, not duplicates), so storage
+is ~1× the raw table and there is no "reprocess" cost on each ingest.
+
+**Build function.** Same per-batch pattern as §4.2 but reading bins from
+the MV. The direct `raw_telemetry` reference is used only to discover the
+bin range of the new extent; everything else is pulled from the MV via the
+indirect `database(current_database()).raw_telemetry_wide_mv` reference,
+which escapes the per-extent rewrite.
+
+```kusto
+.create-or-alter function build_multivariate_windows_batch_from_mv(
+        machine:string, window_size:int) {
+    let new_bins = raw_telemetry  // extent-filtered
+        | where machine_id == machine
+        | summarize by ts_bin = bin(ts, 1s), machine_id;
+    let new_ts_min = toscalar(new_bins | summarize min(ts_bin));
+    let new_data = database(current_database()).raw_telemetry_wide_mv
+        | where machine_id == machine and ts_bin >= new_ts_min
+        | project ts_bin, machine_id, sensor_values = pack( ...all 8 sensors... );
+    let context = database(current_database()).raw_telemetry_wide_mv
+        | where machine_id == machine and ts_bin < new_ts_min
+        | top (window_size - 1) by ts_bin desc
+        | project ts_bin, machine_id, sensor_values = pack( ...all 8 sensors... );
+    union context, new_data
+    | order by ts_bin asc
+    | extend rn = row_number() - 1, win_id = rn / window_size
+    | summarize window_start = min(ts_bin), window_end = max(ts_bin),
+                values = make_list(sensor_values)
+        by machine_id, win_id
+    | where array_length(values) == window_size
+    | where window_end >= new_ts_min
+}
+```
+
+Missing per-bin sensor values become `null` inside the bag and are
+forward-filled (`pandas .ffill().bfill().fillna(0)`) inside the Python
+plugin so the model never sees `NaN`.
+
+**Scoring function.** Reads the latest model row, gets `window_size` and
+`threshold` from the model metadata (the threshold is computed during
+training as `mean(loss) + K·std(loss)`), and runs ONNX in the sandbox.
+Normalization is **baked into the ONNX graph** as constant
+`mean`/`std` buffers (`NormalizedScoreWrapper` in the training notebook),
+so the function passes raw sensor values straight from the MV — no scaling
+step in KQL, no risk of train/score skew.
+
+```kusto
+.create-or-alter function score_multivariate_onnx_batch_from_mv(
+        model_name:string, machine:string) {
+    let m         = latest_model(model_name);
+    let model_b64 = toscalar(m | project payload);
+    let win_size  = toint(toscalar(m | project window_size));
+    let threshold = todouble(toscalar(m | project todouble(metadata.threshold)));
+    build_multivariate_windows_batch_from_mv(machine, win_size)
+    | extend model_b64 = model_b64
+    | evaluate python(typeof(*, score:real),
+```
+import base64, numpy as np, pandas as pd, onnxruntime as ort
+SENSORS = ['temperature_motor', ...]
+sess = ort.InferenceSession(base64.b64decode(df['model_b64'].iloc[0]))
+batch = []
+for win in df['values']:
+    wdf = pd.DataFrame([[step.get(s) for s in SENSORS] for step in win], columns=SENSORS)
+    wdf = wdf.ffill().bfill().fillna(0.0)
+    batch.append(wdf.to_numpy(dtype=np.float32))
+X = np.stack(batch)  # (batch, window_size, n_features)
+out = sess.run(None, {sess.get_inputs()[0].name: X})[0].reshape(-1)
+result = df.copy()
+result['score'] = out
+```)
+    | extend is_anomaly = score > threshold, detected_at = now()
+}
+```
+
+**Anchor-sensor dedup in the update policy.** A long table with N sensors
+per machine generates N rows per `ts_bin` per machine. Without care, the
+update policy on `anomalies` would fire ~N× per ingest batch (once per
+incoming sensor row). A simple fix: filter the top-level entry function so
+it emits rows only when the new batch contains at least one row of an
+*anchor sensor*:
+
+```kusto
+.create-or-alter function fn_score_multivariate_demo() {
+    let n_anchor = toscalar(
+        raw_telemetry
+        | where machine_id == 'M-001' and sensor_id == 'temperature_motor'
+        | summarize count()
+    );
+    score_multivariate_onnx_batch_from_mv('multivariate_ae__M-001', 'M-001')
+    | where n_anchor > 0
+    | where is_anomaly
+    | project detected_at, machine_id, sensor_id = '', window_start, window_end,
+              model_name, model_version, score, is_anomaly,
+              payload = bag_pack('values', values)
+}
+```
+
+The two policies coexist on `anomalies` (univariate `fn_score_demo` +
+multivariate `fn_score_multivariate_demo`):
+
+```kusto
+.alter table anomalies policy update
+@'[
+  {"IsEnabled": true, "Source": "raw_telemetry", "Query": "fn_score_demo()",              "IsTransactional": false, "PropagateIngestionProperties": false},
+  {"IsEnabled": true, "Source": "raw_telemetry", "Query": "fn_score_multivariate_demo()", "IsTransactional": false, "PropagateIngestionProperties": false}
+]'
+```
+
+Rows from each policy are distinguished downstream by `model_name`
+(`univariate_ae__*` vs `multivariate_ae__*`).
+
+**Trade-off recap.**
+
+- ✅ One pivot maintained for free (the MV), no runtime pivot in the policy.
+- ✅ Cost stays proportional to new data (same boundary-context trick as univariate).
+- ✅ Threshold lives in model metadata — no KQL redeploy when retraining.
+- ✅ Normalization baked into ONNX — stateless KQL, no skew.
+- ⚠️ One model per machine: the MV column list is fixed; adding a sensor
+  is a `.create-or-alter materialized-view` (and a retrain).
+- ⚠️ Anchor-sensor dedup assumes the anchor is reliably present. For
+  production, either pick the densest sensor as anchor or move to a small
+  routing helper that picks one anchor per `(machine, batch)`.
+
 ---
 
 ## 5. Path C — Managed multivariate (preview): `series_mv_*` + `time-series-anomaly-detector`
@@ -682,6 +837,7 @@ From these you can build additional Activators for "the model is failing".
 | Many independent metrics, value-based anomalies | **A** repeated for each metric |
 | Cross-sensor correlation, custom model | **B** — Isolation Forest in pickle + update policy |
 | Shape patterns (waveforms, vibrations) | **B** — autoencoder via ONNX/external_artifacts |
+| Per-machine multivariate over many fixed sensors, in-Eventhouse | **B §4.6** — LSTM autoencoder + wide materialized view |
 | Classic managed multivariate | **C** — `time-series-anomaly-detector` |
 | Very heavy model (large DL) | External endpoint (Azure ML) — not covered here |
 

@@ -61,16 +61,19 @@ silent until it expires.
 │   ├── anomaly_detection_fabric_kql.md          # KQL cookbook (every option, with code)
 │   └── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
 ├── kql/
-│   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy
+│   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy, streaming OFF
 │   ├── 02_models.kql                     # versioned ONNX model registry
-│   ├── 03_scoring_functions.kql          # window builders + python(onnx) scorers
-│   └── 04_update_policy.kql              # auto-score on ingest
-├── items/
-│   ├── nb_prepare_features.Notebook/
-│   ├── nb_train_export_onnx.Notebook/
-│   └── nb_register_kql_scorer.Notebook/
-├── notebooks/                            # ad-hoc / exploration notebooks
-├── tools/                                # Python helpers (Eventstream wiring, KQL setup, anomaly inject)
+│   ├── 03_scoring_functions.kql          # univariate + multivariate window builders, python(onnx) scorers
+│   ├── 04_update_policy.kql              # auto-score on ingest (univariate)
+│   └── 05_multivariate_mv.kql            # wide materialized view + multivariate scoring + 2nd update policy
+├── items/                                # blank scaffolds, kept for the legacy notebooks named below
+│   ├── nb_prepare_features.Notebook/         # legacy — superseded by the wide MV
+│   ├── nb_train_export_onnx.Notebook/        # legacy — superseded by notebooks/04 and 05
+│   └── nb_register_kql_scorer.Notebook/      # still in use: re-applies kql/*.kql
+├── notebooks/                            # active training notebooks (publish via tools/upload_notebook.py)
+│   ├── 04_train_univariate_ae.ipynb      # per-sensor LSTM AE → univariate_ae__<sensor_id>
+│   └── 05_train_multivariate_ae.ipynb    # per-machine LSTM AE over wide MV → multivariate_ae__<machine_id>
+├── tools/                                # Python helpers (Eventstream wiring, KQL setup, anomaly inject, notebook publish)
 ├── simulator-local/                      # run the simulator locally
 ├── simulator-cloud/                      # always-on simulator on Azure Container Apps
 └── scripts/
@@ -82,9 +85,12 @@ silent until it expires.
 
 ## What the script creates
 
-All items are **blank** (notebooks ship with starter code from `items/`).
-Schema, Eventstream sources/destinations, and Reflex rules are configured
-post-deploy — see [`docs/architecture.md`](docs/architecture.md).
+All items below are **blank container items** — the legacy `nb_*` notebooks
+ship with starter scaffolds from `items/`. The active training notebooks
+(`04_train_univariate_ae`, `05_train_multivariate_ae`) live under
+`notebooks/` and are published as Fabric Notebook items separately with
+[`tools/upload_notebook.py`](tools/upload_notebook.py); see
+[`docs/architecture.md`](docs/architecture.md) §3 and §4.6.
 
 | Item             | Name (default)            | Type           |
 |------------------|---------------------------|----------------|
@@ -94,13 +100,21 @@ post-deploy — see [`docs/architecture.md`](docs/architecture.md).
 | KQL Database     | `kql_telemetry`           | KQLDatabase    |
 | Lakehouse        | `lh_telemetry`            | Lakehouse      |
 | Environment      | `env_anomaly`             | Environment    |
-| Notebook         | `nb_prepare_features`     | Notebook       |
-| Notebook         | `nb_train_export_onnx`    | Notebook       |
+| Notebook         | `nb_prepare_features`     | Notebook (legacy scaffold) |
+| Notebook         | `nb_train_export_onnx`    | Notebook (legacy scaffold) |
 | Notebook         | `nb_register_kql_scorer`  | Notebook       |
 | Data Pipeline    | `pl_retrain`              | DataPipeline   |
 | Reflex           | `act_anomaly_alerts`      | Reflex         |
 | Semantic Model   | `sm_anomaly`              | SemanticModel  |
 | Report           | `rpt_anomaly`             | Report         |
+
+In addition, after running the training notebooks once, two more Notebook
+items appear in the workspace:
+
+| Item     | Name (default)                  | Type     |
+|----------|---------------------------------|----------|
+| Notebook | `nb_04_train_univariate_ae`     | Notebook |
+| Notebook | `nb_05_train_multivariate_ae`   | Notebook |
 
 Item names use underscores throughout because some Fabric item types
 (Eventstream, Reflex, …) reject hyphens. Defaults can be overridden in

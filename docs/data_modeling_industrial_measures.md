@@ -331,6 +331,19 @@ Main reasons:
 
 - **Toward B** if the machine types are very few (two or three) and no growth is expected, and you want to maximize operational tidiness. Suited to contexts with a single industrial product and very stable processes.
 
+### How this repo implements Type C
+
+The demo in this repository is a minimal but faithful Type C deployment:
+
+- **Bronze / Silver** — a single long table `raw_telemetry` (one row per measurement, columns `ts`, `machine_id`, `sensor_id`, `value`, `unit`).
+- **Gold** — instead of building per-type wide tables via update-policy pivots (as described in §4), the repo uses a **materialized view** `raw_telemetry_wide_mv` that pivots `raw_telemetry` into one row per `(machine_id, ts_bin = 1s)` with one column per sensor. The MV is auto-maintained by Eventhouse on every ingest, so the Gold layer needs no orchestration code and costs ~1× storage.
+- **Anomaly fan-in** — a single `anomalies` table fed by **two** update policies on `raw_telemetry`: `fn_score_demo()` (univariate per-sensor LSTM AE) and `fn_score_multivariate_demo()` (multivariate per-machine LSTM AE over the wide MV). Rows are distinguished by `model_name` (`univariate_ae__*` vs `multivariate_ae__*`).
+- **Lookup table deferred** — `machines_dim` is not yet implemented; the multivariate model is currently per-machine with a hard-coded `machine_id`. A small routing table is the next natural extension.
+
+The materialized view is a lighter-weight Gold materialization than the update-policy pivot pattern of §4: it has no scheduling, no double-write to keep in sync, and adapts to backfills automatically. The trade-off is that the column list is fixed at MV definition time — adding a sensor requires a `.create-or-alter materialized-view` (and a model retrain).
+
+For the full deployed shape see [`./architecture.md`](./architecture.md) §3 and [`./anomaly_detection_fabric_kql.md`](./anomaly_detection_fabric_kql.md) §4.6.
+
 ---
 
 ## 7. Implementation outline of the recommended solution
