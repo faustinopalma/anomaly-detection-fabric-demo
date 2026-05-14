@@ -253,21 +253,23 @@ recent normal scores). Above the threshold → row goes into `anomalies`.
 
 ---
 
-## 9. Why scoring on a single new "extent" wasn't enough — and what we did
+## 9. Window-based models need history that a single batch doesn't have
 
-This is the second non-obvious thing about update policies, after the
-streaming-vs-queued one.
+The autoencoder needs **64 contiguous samples for the same (machine,
+sensor)** to score one window. By default the update policy only shows the
+function the rows of the **batch that just arrived**, which is far too
+little data to build that window. This section explains why, and how we
+work around it.
 
 When the engine fires the update policy, internally it rewrites the
 function so that any direct mention of `raw_telemetry` only sees the rows
-of the **single batch that just got ingested**. That is great for
-point-wise scoring (one row in, one score out): it keeps the work
-proportional to the new data.
+of the single new batch. That behaviour is great for point-wise scoring
+(one row in, one score out): it keeps the work proportional to the new
+data.
 
-But our autoencoder needs **64 contiguous samples for the same (machine,
-sensor)** to form one window. A single batch typically lasts ~30 seconds,
-which for one specific sensor on one specific machine is only ~30 samples
-— not enough to build any window. The function would emit zero rows on
+But a single batch typically lasts a handful of seconds, which for one
+specific sensor on one specific machine is only a few dozen samples — not
+enough to build a 64-sample window. The function would emit zero rows on
 every batch and the `anomalies` table would stay empty forever.
 
 The workaround is to tell the function "ignore the per-batch restriction;
