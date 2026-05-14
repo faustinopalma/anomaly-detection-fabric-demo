@@ -116,8 +116,9 @@ Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
 Write-Host "  1. Add a CustomEndpoint source to the eventstream and write its" -ForegroundColor Cyan
 Write-Host "     connection string into .env (no portal needed):" -ForegroundColor Cyan
-Write-Host "         python tools/setup_eventstream_endpoint.py" -ForegroundColor Yellow
-Write-Host "  2. Start the telemetry simulator:" -ForegroundColor Cyan
-Write-Host "         python tools/simulate_machines.py" -ForegroundColor Yellow
+Write-Host "         python tools/01_setup_eventstream_source.py" -ForegroundColor Yellow
+Write-Host "  2. Start the telemetry simulator (locally for dev, or as ACA for always-on):" -ForegroundColor Cyan
+Write-Host "         python simulator-local/simulate_machines.py" -ForegroundColor Yellow
+Write-Host "         pwsh ./simulator-cloud/deploy.ps1" -ForegroundColor Yellow
 Write-Host "  3. Run the KQL scripts in ./kql against $($env:FABRIC_KQLDB_NAME)" -ForegroundColor Cyan
 Write-Host "     and wire any remaining destinations. See docs/architecture.md." -ForegroundColor Cyan

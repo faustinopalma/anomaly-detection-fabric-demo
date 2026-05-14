@@ -1,4 +1,12 @@
 azure-eventhub>=5.12.0
 azure-identity>=1.17.0
+azure-kusto-data>=4.6.0
+msal-extensions>=1.2.0
 requests>=2.32.0
 python-dotenv>=1.0.1
+# Training / ONNX export (notebooks/04_train_univariate_ae.ipynb)
+numpy>=1.26
+pandas>=2.2
+torch>=2.2
+onnx>=1.16
+ipykernel>=6.29

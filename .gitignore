@@ -17,6 +17,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Office lock / temp files
+~$*
+
 # Editors
 .vscode/*
 !.vscode/extensions.json
@@ -28,3 +31,5 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+.auth_record.json
