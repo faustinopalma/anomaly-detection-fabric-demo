@@ -2,32 +2,87 @@
 // Stored functions that build sliding windows and call the ONNX model
 // in-process via the python() plugin.
 //
+// Two variants per family:
+//
+//   *_batch     → designed to be called from an UPDATE POLICY. Reads only
+//                 the new extent + a tiny (window_size - 1) prefix from
+//                 history. Cost is proportional to the new data; each
+//                 window is scored exactly once across the lifetime of
+//                 the pipeline. THIS is the one used in production.
+//
+//   *_lookback  → designed for AD-HOC use (notebooks, manual queries,
+//                 backfill). Reads a fixed lookback window from the full
+//                 table and re-emits the same windows on every call →
+//                 not idempotent, do NOT plug directly into an update
+//                 policy.
+//
 // Prerequisites
 // -------------
-// * The python() language plugin must be enabled on the Eventhouse.
-//   Ask a workspace/cluster admin if it is not.
+// * The python() language plugin must be enabled on the Eventhouse AND on
+//   every KQL Database that uses it (see anomaly_detection_fabric_kql.md
+//   §2.1 — the Eventhouse-level toggle does not cascade).
 // * Models must already exist in the `models` table (uploaded by the
 //   training notebook) with name = model_name and a valid base64 ONNX
 //   payload.
 
 // ---------------------------------------------------------------------------
-// build_univariate_windows
-//   For one sensor of one machine, produce non-overlapping fixed-size
-//   windows of length `window_size` ending at or before `until`.
+// build_univariate_windows_batch
+//
+// Call ONLY from an update policy. The direct `raw_telemetry` reference
+// gets extent-filtered by the engine, so it returns just the rows of the
+// new batch. We pull the (window_size - 1) preceding samples for the same
+// (machine, sensor) so that windows straddling the batch boundary are
+// emitted exactly once — by the batch that contains their last sample.
+//
+// Output: one row per complete window whose `window_end` falls in the new
+// batch's timestamp range. No duplicates across batches, no data loss
+// between batches.
 // ---------------------------------------------------------------------------
 .create-or-alter function with (folder='scoring',
-        docstring='Build fixed-length windows for a single (machine, sensor)')
-    build_univariate_windows(
+        docstring='Build windows for one (machine, sensor) from the new extent + minimal context. For update-policy use.')
+    build_univariate_windows_batch(
+        machine:string, sensor:string,
+        window_size:int
+    ) {
+    let new_data = raw_telemetry  // extent-filtered when called from update policy
+        | where machine_id == machine and sensor_id == sensor
+        | project ts, value;
+    let new_ts_min = toscalar(new_data | summarize min(ts));
+    // (window_size - 1) preceding samples = enough to complete any window
+    // that straddles the boundary between this batch and the previous data.
+    let context = database(current_database()).raw_telemetry
+        | where machine_id == machine and sensor_id == sensor and ts < new_ts_min
+        | top (window_size - 1) by ts desc
+        | project ts, value;
+    union context, new_data
+    | order by ts asc
+    | extend rn = row_number() - 1
+    | extend win_id = rn / window_size
+    | summarize
+        window_start = min(ts),
+        window_end   = max(ts),
+        values       = make_list(value)
+        by win_id
+    | where array_length(values) == window_size
+    | where window_end >= new_ts_min  // skip windows entirely in the past
+    | extend machine_id = machine, sensor_id = sensor
+    | project-away win_id
+}
+
+// ---------------------------------------------------------------------------
+// build_univariate_windows_lookback
+//
+// Ad-hoc / backfill variant. Reads `lookback` worth of history from the
+// full table and chops it into non-overlapping fixed-size windows. Same
+// window every call → DO NOT use in an update policy (would create
+// duplicates).
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Build windows for one (machine, sensor) over a fixed lookback. For ad-hoc use.')
+    build_univariate_windows_lookback(
         machine:string, sensor:string,
         window_size:int, lookback:timespan
     ) {
-    // We use `database(current_database()).raw_telemetry` (instead of plain
-    // `raw_telemetry`) so that when this function is invoked from an update
-    // policy, the engine does NOT rewrite the source to be filtered by the
-    // single new extent. We need the FULL recent history to be able to build
-    // 64-sample windows; otherwise each per-extent invocation only sees a
-    // tiny slice and `array_length(values) == window_size` is never true.
-    // See: https://learn.microsoft.com/kusto/management/update-policy
     database(current_database()).raw_telemetry
     | where machine_id == machine and sensor_id == sensor
     | where ts > now() - lookback
@@ -44,25 +99,24 @@
 }
 
 // ---------------------------------------------------------------------------
-// score_univariate_onnx
-//   Pass each window through the latest ONNX model named `model_name`.
-//   The model must accept input shape [batch, window_size, 1] (float32)
-//   and return a 1-D anomaly score per row.
+// score_univariate_onnx_batch
+//
+// For update-policy use. Scores only windows that complete in the new batch.
 // ---------------------------------------------------------------------------
 .create-or-alter function with (folder='scoring',
-        docstring='Score univariate windows with an ONNX model')
-    score_univariate_onnx(
+        docstring='Score the new-batch windows of one (machine, sensor) with an ONNX model')
+    score_univariate_onnx_batch(
         model_name:string, machine:string, sensor:string,
-        window_size:int, lookback:timespan, threshold:real
+        window_size:int, threshold:real
     ) {
     let model_row = toscalar(latest_model(model_name) | project payload);
     let model_ver = toscalar(latest_model(model_name) | project version);
-    build_univariate_windows(machine, sensor, window_size, lookback)
+    build_univariate_windows_batch(machine, sensor, window_size)
     | extend model_b64 = model_row
     | evaluate python(
         typeof(*, score:real),
 ```
-import base64, io, numpy as np, onnxruntime as ort
+import base64, numpy as np, onnxruntime as ort
 if len(df) == 0:
     result = df.copy()
     result['score'] = np.array([], dtype=float)
@@ -86,18 +140,101 @@ else:
 }
 
 // ---------------------------------------------------------------------------
-// build_multivariate_windows
-//   For one machine, produce windows aligned across multiple sensors.
-//   Output `values` is a 2-D dynamic array shaped [window_size, n_sensors].
+// score_univariate_onnx_lookback
+//
+// Ad-hoc / backfill variant.
 // ---------------------------------------------------------------------------
 .create-or-alter function with (folder='scoring',
-        docstring='Build aligned multi-sensor windows for one machine')
-    build_multivariate_windows(
+        docstring='Score all windows of one (machine, sensor) over a fixed lookback')
+    score_univariate_onnx_lookback(
+        model_name:string, machine:string, sensor:string,
+        window_size:int, lookback:timespan, threshold:real
+    ) {
+    let model_row = toscalar(latest_model(model_name) | project payload);
+    let model_ver = toscalar(latest_model(model_name) | project version);
+    build_univariate_windows_lookback(machine, sensor, window_size, lookback)
+    | extend model_b64 = model_row
+    | evaluate python(
+        typeof(*, score:real),
+```
+import base64, numpy as np, onnxruntime as ort
+if len(df) == 0:
+    result = df.copy()
+    result['score'] = np.array([], dtype=float)
+else:
+    b64 = df['model_b64'].iloc[0]
+    sess = ort.InferenceSession(base64.b64decode(b64))
+    input_name = sess.get_inputs()[0].name
+    X = np.stack(df['values'].values).astype(np.float32)
+    X = X.reshape(X.shape[0], X.shape[1], 1)
+    out = sess.run(None, {input_name: X})[0].reshape(-1)
+    result = df.copy()
+    result['score'] = out
+```
+    )
+    | project-away model_b64
+    | extend
+        model_name    = model_name,
+        model_version = model_ver,
+        is_anomaly    = score > threshold,
+        detected_at   = now()
+}
+
+// ---------------------------------------------------------------------------
+// build_multivariate_windows_batch
+//
+// Update-policy variant for multi-sensor windows on one machine. Strategy
+// mirrors build_univariate_windows_batch:
+//   - direct raw_telemetry ref to get extent-filtered new data,
+//   - bin by `bin`, fan in sensors per bin,
+//   - pull (window_size - 1) preceding bins as context,
+//   - keep only windows whose window_end falls in the new batch.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Build aligned multi-sensor windows from the new extent + minimal context. For update-policy use.')
+    build_multivariate_windows_batch(
+        machine:string, sensors:dynamic,
+        window_size:int, bin:timespan
+    ) {
+    let new_bins = raw_telemetry  // extent-filtered when called from update policy
+        | where machine_id == machine and sensor_id in (sensors)
+        | summarize avg_value = avg(value)
+            by bin = bin(ts, bin), machine_id, sensor_id
+        | summarize sensor_values = make_bag(pack(sensor_id, avg_value))
+            by bin, machine_id;
+    let new_bin_min = toscalar(new_bins | summarize min(bin));
+    let context = database(current_database()).raw_telemetry
+        | where machine_id == machine and sensor_id in (sensors) and ts < new_bin_min
+        | summarize avg_value = avg(value)
+            by bin = bin(ts, bin), machine_id, sensor_id
+        | summarize sensor_values = make_bag(pack(sensor_id, avg_value))
+            by bin, machine_id
+        | top (window_size - 1) by bin desc;
+    union context, new_bins
+    | order by bin asc
+    | extend rn = row_number() - 1
+    | extend win_id = rn / window_size
+    | summarize
+        window_start = min(bin),
+        window_end   = max(bin),
+        values       = make_list(sensor_values)
+        by machine_id, win_id
+    | where array_length(values) == window_size
+    | where window_end >= new_bin_min
+    | project-away win_id
+}
+
+// ---------------------------------------------------------------------------
+// build_multivariate_windows_lookback
+//
+// Ad-hoc / backfill variant.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Build aligned multi-sensor windows over a fixed lookback. For ad-hoc use.')
+    build_multivariate_windows_lookback(
         machine:string, sensors:dynamic,
         window_size:int, bin:timespan, lookback:timespan
     ) {
-    // See note on build_univariate_windows: bypass per-extent rewrite when
-    // invoked from an update policy.
     database(current_database()).raw_telemetry
     | where machine_id == machine and sensor_id in (sensors)
     | where ts > now() - lookback
@@ -111,30 +248,29 @@ else:
     | summarize
         window_start = min(bin),
         window_end   = max(bin),
-        rows         = make_list(sensor_values)
+        values       = make_list(sensor_values)
         by machine_id, win_id
-    | where array_length(rows) == window_size
-    | extend values = rows  // training notebook agrees on sensor order via metadata
-    | project-away win_id, rows
+    | where array_length(values) == window_size
+    | project-away win_id
 }
 
 // ---------------------------------------------------------------------------
-// score_multivariate_onnx
-//   Score multivariate windows with an ONNX model.
-//   The model must accept input shape [batch, window_size, n_sensors] float32.
+// score_multivariate_onnx_batch
+//
+// For update-policy use.
 // ---------------------------------------------------------------------------
 .create-or-alter function with (folder='scoring',
-        docstring='Score multivariate windows with an ONNX model')
-    score_multivariate_onnx(
+        docstring='Score the new-batch multivariate windows of one machine with an ONNX model')
+    score_multivariate_onnx_batch(
         model_name:string, machine:string,
-        bin:timespan, lookback:timespan, threshold:real
+        bin:timespan, threshold:real
     ) {
     let m         = latest_model(model_name);
     let model_b64 = toscalar(m | project payload);
     let model_ver = toscalar(m | project version);
     let win_size  = toint(toscalar(m | project window_size));
     let sensors   = toscalar(m | project sensors);
-    build_multivariate_windows(machine, sensors, win_size, bin, lookback)
+    build_multivariate_windows_batch(machine, sensors, win_size, bin)
     | extend model_b64 = model_b64, sensors = sensors
     | evaluate python(
         typeof(*, score:real),
@@ -152,7 +288,55 @@ else:
     for row in df['values']:
         mat = np.array([[step.get(s, 0.0) for s in sensors] for step in row], dtype=np.float32)
         batch.append(mat)
-    X = np.stack(batch)  # [batch, window, n_sensors]
+    X = np.stack(batch)
+    out = sess.run(None, {input_name: X})[0].reshape(-1)
+    result = df.copy()
+    result['score'] = out
+```
+    )
+    | project-away model_b64, sensors
+    | extend
+        model_name    = model_name,
+        model_version = model_ver,
+        is_anomaly    = score > threshold,
+        detected_at   = now()
+}
+
+// ---------------------------------------------------------------------------
+// score_multivariate_onnx_lookback
+//
+// Ad-hoc / backfill variant.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='scoring',
+        docstring='Score all multivariate windows of one machine over a fixed lookback')
+    score_multivariate_onnx_lookback(
+        model_name:string, machine:string,
+        bin:timespan, lookback:timespan, threshold:real
+    ) {
+    let m         = latest_model(model_name);
+    let model_b64 = toscalar(m | project payload);
+    let model_ver = toscalar(m | project version);
+    let win_size  = toint(toscalar(m | project window_size));
+    let sensors   = toscalar(m | project sensors);
+    build_multivariate_windows_lookback(machine, sensors, win_size, bin, lookback)
+    | extend model_b64 = model_b64, sensors = sensors
+    | evaluate python(
+        typeof(*, score:real),
+```
+import base64, numpy as np, onnxruntime as ort
+if len(df) == 0:
+    result = df.copy()
+    result['score'] = np.array([], dtype=float)
+else:
+    b64 = df['model_b64'].iloc[0]
+    sensors = list(df['sensors'].iloc[0])
+    sess = ort.InferenceSession(base64.b64decode(b64))
+    input_name = sess.get_inputs()[0].name
+    batch = []
+    for row in df['values']:
+        mat = np.array([[step.get(s, 0.0) for s in sensors] for step in row], dtype=np.float32)
+        batch.append(mat)
+    X = np.stack(batch)
     out = sess.run(None, {input_name: X})[0].reshape(-1)
     result = df.copy()
     result['score'] = out

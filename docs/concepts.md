@@ -259,7 +259,7 @@ The autoencoder needs **64 contiguous samples for the same (machine,
 sensor)** to score one window. By default the update policy only shows the
 function the rows of the **batch that just arrived**, which is far too
 little data to build that window. This section explains why, and how we
-work around it.
+solve it cleanly.
 
 When the engine fires the update policy, it doesn't run the function
 "as written". It transparently injects a filter so that, inside the
@@ -273,24 +273,59 @@ not rescan the entire history on every trigger.
 That behaviour is great for point-wise scoring (one row in, one score
 out): it keeps the work proportional to the new data.
 
-But a single batch typically lasts a handful of seconds, which for one
-specific sensor on one specific machine is only a few dozen samples — not
-enough to build a 64-sample window. The function would emit zero rows on
-every batch and the `anomalies` table would stay empty forever.
+But how big is "the new batch"? That is governed by the table's
+**ingestion batching policy**. If batches are too small (a default
+behaviour under high event rates is to close on the row cap after only a
+few seconds), most batches won't even contain 64 samples for a given
+(machine, sensor). We pin this down explicitly in `kql/01_tables.kql`:
 
-The workaround is to tell the function "ignore the per-batch restriction;
-read the last N minutes from the full table". Eventhouse supports this via
-an indirect reference to the table (`database(current_database()).raw_telemetry`
-instead of just `raw_telemetry`). The indirect form is **not** rewritten
-by the engine, so the function sees the full history. The trade-off is
-duplication: every batch re-reads the lookback window and may re-emit
-windows that were already emitted before. We accept the duplication and
-dedupe at query time (or via a small "already emitted" tag).
+```kusto
+.alter table raw_telemetry policy ingestionbatching
+{ "MaximumBatchingTimeSpan": "00:01:00", "MaximumNumberOfItems": 25000, ... }
+```
 
-The right mental model: **update policies are designed for
-record-by-record enrichment**, not for "process the last 10 minutes every
-time". When you do need the latter, the `database()` indirection is the
-escape hatch.
+That gives ~1-minute batches with hundreds of samples per sensor —
+enough to build several full windows per batch.
+
+But one batch boundary will always cut a window in half: the first ~63
+samples of a "boundary window" landed in the previous batch, the last
+sample lands in the new one. If we ignored those, we would silently lose
+one window per batch per (machine, sensor). The scoring function therefore
+does one tiny extra read: it pulls the **last `window_size - 1` samples**
+that arrived **before** this batch, via an indirect reference to the
+table:
+
+```kusto
+let context = database(current_database()).raw_telemetry
+    | where machine_id == machine and sensor_id == sensor and ts < new_ts_min
+    | top (window_size - 1) by ts desc;
+```
+
+The indirect form (`database(current_database()).raw_telemetry`) is **not**
+rewritten by the engine — that's exactly what we need to escape the
+per-batch filter for this specific small read. We then `union` the
+context with the new batch, build windows, and emit only those whose
+`window_end` falls inside the new batch — so each window is scored
+**exactly once across the lifetime of the pipeline**:
+
+```kusto
+| where window_end >= new_ts_min   // skip windows fully in the past
+```
+
+The cost is bounded: at most `window_size - 1` extra rows per (machine,
+sensor) per batch, regardless of how long the pipeline has been running.
+No duplicates, no data loss, latency ≈ batching window.
+
+That's the production pattern, codified in `score_univariate_onnx_batch`
+in `kql/03_scoring_functions.kql`. A separate `score_univariate_onnx_lookback`
+exists for ad-hoc use from notebooks (it scans a lookback window from the
+full table — fine for exploration, but **not** safe inside an update policy
+because it would re-emit the same windows on every batch).
+
+The right mental model: **update policies are designed for proportional
+work on the new batch**. A window-based model breaks that assumption only
+at the batch boundary, and the cure is a tiny bounded read of historical
+context — not a periodic full rescan.
 
 ---
 
@@ -346,7 +381,8 @@ deployment, no restart, no service.
 | Update policy as the bridge | No external scheduler / orchestrator; the engine itself promotes anomalous rows |
 | Disable streaming on `raw_telemetry` | Required so the Python plugin is allowed in the update policy; ~10s latency is fine for industrial AD |
 | ONNX autoencoder, stored inline in `models` | Small, fast, framework-agnostic, sandbox-friendly |
-| `database()` indirection in the scoring function | Lets one batch see enough historical samples to build proper windows |
+| Batch-only scoring + `(window_size − 1)` left-context read | Each window scored exactly once, cost proportional to new data, no duplicates |
+| Explicit `ingestionbatching` policy on `raw_telemetry` | Pin batch cadence (~1 min) so each batch contains enough samples per (machine, sensor) for full windows |
 | Reflex on `anomalies` | Native, code-free way to turn rows into Teams/email/automation |
 | Native KQL anomaly functions kept as a fallback | Cover the easy 80% with zero ML work |
 

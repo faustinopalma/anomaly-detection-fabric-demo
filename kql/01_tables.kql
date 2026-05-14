@@ -17,6 +17,36 @@
 
 .alter-merge table raw_telemetry policy retention softdelete = 30d
 
+// ---------------------------------------------------------------------------
+// Disable streaming ingestion on raw_telemetry.
+// The python() plugin used by the scoring update policy is not allowed in
+// update policies whose source table uses streaming ingestion. In Fabric
+// Eventhouse streaming is the default for every new table, so we must
+// explicitly turn it off here. Latency moves from sub-second to a few
+// seconds (controlled by the batching policy below).
+// See docs/concepts.md §6 and anomaly_detection_fabric_kql.md §2.3.
+// ---------------------------------------------------------------------------
+.alter table raw_telemetry policy streamingingestion '{"IsEnabled": false}'
+
+// ---------------------------------------------------------------------------
+// Ingestion batching policy.
+// The default (5 min OR 1000 rows OR 1 GB, whichever first) means that under
+// high event rates batches close on the row cap after only ~10s, producing
+// very small extents. Small extents are bad for the per-batch scoring
+// function (fewer samples per (machine, sensor) → fewer complete windows).
+// We bump the row cap so that MaximumBatchingTimeSpan is the effective limit:
+// predictable ~1 min batches with hundreds of samples per (machine, sensor).
+// Tune to match your workload's frequency and how fresh the alerts must be.
+// ---------------------------------------------------------------------------
+.alter table raw_telemetry policy ingestionbatching
+```
+{
+  "MaximumBatchingTimeSpan": "00:01:00",
+  "MaximumNumberOfItems":    25000,
+  "MaximumRawDataSizeMB":    1024
+}
+```
+
 // Optional: schema-on-read JSON mapping for Eventstream ingestion.
 .create-or-alter table raw_telemetry ingestion json mapping 'raw_telemetry_json'
 ```

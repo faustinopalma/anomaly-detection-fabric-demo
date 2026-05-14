@@ -246,16 +246,35 @@ These bite anyone who builds the scoring layer for the first time. They are unre
 
    Latency moves from <1 s to 5-30 s — fine for any anomaly-detection scenario.
 
-2. **Per-extent rewrite of direct table references inside the function.** The engine rewrites `measures_raw` (or any direct ref to the source table) inside the update-policy query as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. For window-based scoring (e.g. an autoencoder over 64 samples per `(machine, sensor)`) a single extent rarely contains enough contiguous data to build a complete window, so the function emits zero rows. Bypass the rewrite by referencing the table **indirectly via `database()`** so you can read the last N minutes:
+2. **Per-extent rewrite of direct table references inside the function.** The engine rewrites `measures_raw` (or any direct ref to the source table) inside the update-policy query as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. For window-based scoring (e.g. an autoencoder over 64 samples per `(machine, sensor)`) a single extent must contain enough contiguous data to build complete windows, and windows that *straddle* the boundary between two batches would otherwise be silently lost.
 
-   ```kusto
-   database(current_database()).measures_raw
-   | where machine_id == ... and sensor_id == ...
-   | where ts > now() - 10m
-   | ...
-   ```
+   The clean production pattern combines two things:
 
-   This re-reads the lookback window on every batch and therefore can re-emit duplicate anomalies; dedupe at query time or persist a "already-emitted" tag.
+   - Pin the source table's batch cadence with an explicit `ingestionbatching` policy so each batch contains hundreds of samples per (machine, sensor):
+
+     ```kusto
+     .alter table measures_raw policy ingestionbatching
+     '{ "MaximumBatchingTimeSpan": "00:01:00", "MaximumNumberOfItems": 25000, "MaximumRawDataSizeMB": 1024 }'
+     ```
+
+   - In the scoring function, read the new extent directly from `measures_raw` (extent-filtered) and pull only **`window_size − 1` preceding rows** of left context indirectly via `database()` to complete any boundary-straddling window. Then keep only windows whose `window_end` is in the new batch:
+
+     ```kusto
+     let new_data = measures_raw  // extent-filtered
+         | where machine_id == m and sensor_id == s | project ts, value;
+     let new_ts_min = toscalar(new_data | summarize min(ts));
+     let context = database(current_database()).measures_raw
+         | where machine_id == m and sensor_id == s and ts < new_ts_min
+         | top (window_size - 1) by ts desc | project ts, value;
+     union context, new_data
+     | order by ts asc
+     | extend rn = row_number() - 1, win_id = rn / window_size
+     | summarize window_end = max(ts), values = make_list(value) by win_id
+     | where array_length(values) == window_size
+     | where window_end >= new_ts_min   // each window scored exactly once
+     ```
+
+   Cost stays proportional to the new data, every window is scored exactly once across the lifetime of the pipeline, and there are no duplicates to dedupe downstream. A naïve `where ts > now() - 10m` scan inside an update policy works for ad-hoc queries from a notebook but produces duplicates and re-reads the same rows on every batch — avoid it in production.
 
 ### When it makes sense
 

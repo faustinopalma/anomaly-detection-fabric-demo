@@ -393,21 +393,37 @@ Every new record entering `measures_raw` is scored; only anomalous rows land in 
 > **Two gotchas to remember when wiring this up:**
 >
 > 1. **Disable streaming on the source table first** — see §2.3. Without it the plugin invocation fails silently.
-> 2. **Per-extent rewrite of the source table.** When invoked from an update policy the engine rewrites every direct reference to the source table as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. That means the function only sees the rows of the new extent — typically a tiny slice (seconds to a couple of minutes). For point-wise scoring (one row in, one score out) that's fine. For **window-based scoring** (e.g. 64-sample autoencoder windows) a single extent rarely contains enough contiguous samples per `(machine, sensor)` to build any complete window, so nothing comes out and the `anomalies` table stays empty.
+> 2. **Per-extent rewrite of the source table.** When invoked from an update policy the engine rewrites every direct reference to the source table as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. That means the function only sees the rows of the new extent. For point-wise scoring (one row in, one score out) that's fine. For **window-based scoring** (e.g. 64-sample autoencoder windows) a single extent rarely contains enough contiguous samples per `(machine, sensor)` to build any complete window — and the windows that *straddle* the boundary between this extent and the previous one would be silently lost.
 >
->     Workaround: inside the scoring function, reference the source table **indirectly via `database()`** so the engine does NOT apply the extent filter and you can read the last N minutes:
+>     **The clean production pattern** combines two things:
 >
->     ```kusto
->     // INSIDE the function called by the update policy
->     database(current_database()).measures_raw
->     | where ts > now() - 10m
->     | ...
->     ```
+>     - Pin the source table's batch cadence so each batch contains hundreds of samples per (machine, sensor):
 >
->     The trade-off is that every batch re-reads the full lookback and re-emits the same windows → you'll get **duplicate anomaly rows**. Mitigations:
->     - Dedupe at query time (`anomalies | summarize arg_max(detected_at, *) by window_start, machine_id, sensor_id`).
->     - Or persist a `(window_start, machine_id, sensor_id)` "already-emitted" tag and filter inside the function.
->     - Or make the function emit only windows whose `window_end` is within the new batch's timestamp range.
+>         ```kusto
+>         .alter table measures_raw policy ingestionbatching
+>         '{ "MaximumBatchingTimeSpan": "00:01:00", "MaximumNumberOfItems": 25000, "MaximumRawDataSizeMB": 1024 }'
+>         ```
+>
+>     - In the scoring function, build windows from `measures_raw` (extent-filtered) **plus a tiny `(window_size − 1)`-row left context** read indirectly via `database()`, then keep only windows whose `window_end` falls in the new batch:
+>
+>         ```kusto
+>         let new_data = measures_raw
+>             | where machine_id == machine and sensor_id == sensor
+>             | project ts, value;
+>         let new_ts_min = toscalar(new_data | summarize min(ts));
+>         let context = database(current_database()).measures_raw
+>             | where machine_id == machine and sensor_id == sensor and ts < new_ts_min
+>             | top (window_size - 1) by ts desc
+>             | project ts, value;
+>         union context, new_data
+>         | order by ts asc
+>         | extend rn = row_number() - 1, win_id = rn / window_size
+>         | summarize window_end = max(ts), values = make_list(value) by win_id
+>         | where array_length(values) == window_size
+>         | where window_end >= new_ts_min   // each window scored exactly once
+>         ```
+>
+>     Cost stays proportional to new data (no full-history rescan), every window is scored exactly once across the lifetime of the pipeline, and there are no duplicates to dedupe downstream. A naïve `where ts > now() - 10m` scan would emit each window many times — useful for ad-hoc queries from a notebook, but the wrong shape for an update policy.
 
 ### 4.3 Pattern: time-series feature engineering
 

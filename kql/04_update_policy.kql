@@ -6,30 +6,28 @@
 // PREREQUISITE
 //   The source table (`raw_telemetry`) MUST be on queued ingestion, NOT
 //   streaming. The python() plugin is not allowed in update policies whose
-//   source table uses streaming ingestion.
-//   In Fabric Eventhouse streaming ingestion is enabled by default for all
-//   tables, so you must explicitly disable it once on `raw_telemetry`:
-//
-//     .alter table raw_telemetry policy streamingingestion '{"IsEnabled": false}'
-//
-//   Eventstream then delivers in queued mode (latency ~5-30s, fine for
-//   anomaly detection). See anomaly_detection_fabric_kql.md §2.3 for the
-//   full reasoning and the official Microsoft docs links.
+//   source table uses streaming ingestion. The streaming-disable command
+//   is in 01_tables.kql; the batching policy there controls how often
+//   this update policy fires (default: ~1 min batches).
+//   See docs/concepts.md §6 and §9.
 //
 // IMPORTANT
 //   * `machine` / `sensor` / threshold values below are demo defaults.
 //     For production you'll usually loop machines from a separate function
 //     or pre-create a (machine, sensor, model) routing table.
+//   * We call score_univariate_onnx_BATCH (not _lookback). The _batch
+//     variant is the only one safe inside an update policy: it scores
+//     each window exactly once across the lifetime of the pipeline.
+//     See kql/03_scoring_functions.kql header for the full rationale.
 
 .create-or-alter function with (folder='scoring',
-        docstring='Scoring entry point: score recent windows for a fixed (machine, sensor)')
+        docstring='Scoring entry point: score the new-batch windows for a fixed (machine, sensor)')
     fn_score_demo() {
-    score_univariate_onnx(
+    score_univariate_onnx_batch(
         model_name = 'univariate_ae__temperature_motor',
         machine    = 'M-001',
         sensor     = 'temperature_motor',
         window_size= 64,
-        lookback   = 10m,
         threshold  = 3870.0  // ~p95 of recent reconstruction errors (calibrate per machine)
     )
     | where is_anomaly
