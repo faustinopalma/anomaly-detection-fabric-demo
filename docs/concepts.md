@@ -165,10 +165,11 @@ incompatible with stopping to call out to a Python sandbox.
 In Fabric Eventhouse, streaming is the default for every new table. So when
 we attach an Eventstream to `raw_telemetry`, by default we end up with
 sub-second latency but **no scoring**. The fix is one administrative
-command that flips `raw_telemetry` to queued mode. We trade ~1s of latency
-for the ability to run ONNX models on every batch — which is a fantastic
-trade-off for industrial anomaly detection (nobody cares about 10s of delay
-on a vibration alert, everybody cares about catching the alert at all).
+command that flips `raw_telemetry` to queued mode. We trade a few seconds
+of additional ingestion latency for the ability to run ONNX models on
+every batch — generally an acceptable trade-off for industrial anomaly
+detection, where reaction times are typically measured in seconds to
+minutes rather than milliseconds.
 
 > **The mental model**: streaming = "fire hose, no inspection". Queued =
 > "small, regular truckloads that you have time to inspect". Custom ML
