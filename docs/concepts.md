@@ -261,11 +261,17 @@ function the rows of the **batch that just arrived**, which is far too
 little data to build that window. This section explains why, and how we
 work around it.
 
-When the engine fires the update policy, internally it rewrites the
-function so that any direct mention of `raw_telemetry` only sees the rows
-of the single new batch. That behaviour is great for point-wise scoring
-(one row in, one score out): it keeps the work proportional to the new
-data.
+When the engine fires the update policy, it doesn't run the function
+"as written". It transparently injects a filter so that, inside the
+function, every direct mention of `raw_telemetry` only resolves to the
+rows of the **single new batch** — not to the whole table. (Internally
+this is done by wrapping the table reference with a `where extent_id() in
+(...)` clause that names the batch's storage unit.) The intent is
+performance: the function should only re-process what actually arrived,
+not rescan the entire history on every trigger.
+
+That behaviour is great for point-wise scoring (one row in, one score
+out): it keeps the work proportional to the new data.
 
 But a single batch typically lasts a handful of seconds, which for one
 specific sensor on one specific machine is only a few dozen samples — not
@@ -275,10 +281,11 @@ every batch and the `anomalies` table would stay empty forever.
 The workaround is to tell the function "ignore the per-batch restriction;
 read the last N minutes from the full table". Eventhouse supports this via
 an indirect reference to the table (`database(current_database()).raw_telemetry`
-instead of just `raw_telemetry`). The trade-off is duplication: every batch
-re-reads the lookback window and may re-emit windows that were already
-emitted before. We accept the duplication and dedupe at query time (or via
-a small "already emitted" tag).
+instead of just `raw_telemetry`). The indirect form is **not** rewritten
+by the engine, so the function sees the full history. The trade-off is
+duplication: every batch re-reads the lookback window and may re-emit
+windows that were already emitted before. We accept the duplication and
+dedupe at query time (or via a small "already emitted" tag).
 
 The right mental model: **update policies are designed for
 record-by-record enrichment**, not for "process the last 10 minutes every
