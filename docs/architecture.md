@@ -19,26 +19,26 @@ current, …). The detection model:
 ## 2. High-level flow
 
 ```
-[machines × sensors] ──AMQP/Kafka──► Eventstream  (es_machines)
+[machines × sensors] ──AMQP/Kafka──> Eventstream  (es_machines)
                                           │
                 ┌─────────────────────────┼─────────────────────────┐
-                ▼                                                   ▼
+                v                                                   v
   Eventhouse / KQL Database (eh_telemetry / kql_telemetry)    Lakehouse (lh_telemetry)
    ├─ raw_telemetry        (hot store, 30d retention)          ├─ Tables/bronze_telemetry
    ├─ models               (versioned ONNX bytes)              ├─ Tables/silver_telemetry
    ├─ scoring functions    (build window → python(onnx))       ├─ Tables/gold_windows_uni
    ├─ update policy        (auto-score on ingest)              └─ Tables/gold_windows_multi
-   └─ anomalies            (detections; 365d retention)                 ▲
-                ▲                                                       │
+   └─ anomalies            (detections; 365d retention)                 ^
+                ^                                                       │
                 │                                                       │
    Reflex (act_anomaly_alerts)                            Notebook nb_prepare_features
-        Teams / email / pipeline trigger                  Notebook nb_train_export_onnx ──► uploads .onnx into models table
-                                                          Notebook nb_register_kql_scorer ──► (re-)applies KQL functions
-                                                                  ▲
+        Teams / email / pipeline trigger                  Notebook nb_train_export_onnx ──> uploads .onnx into models table
+                                                          Notebook nb_register_kql_scorer ──> (re-)applies KQL functions
+                                                                  ^
                                                                   │
                                                 Data Pipeline (pl_retrain) — schedule
 
-Semantic Model (sm_anomaly) ◄── KQL DB + Lakehouse gold ──► Report (rpt_anomaly)
+Semantic Model (sm_anomaly) <── KQL DB + Lakehouse gold ──> Report (rpt_anomaly)
 ```
 
 ## 3. Items provisioned by `scripts/deploy.ps1`

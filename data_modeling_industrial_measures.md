@@ -160,20 +160,20 @@ The idea is not to choose between A and B, but to **build both layers** so each 
 │  (long, no enrich)  │     as it arrives from the Eventstream
 └──────────┬──────────┘
            │ update policy with lookup against machines_dim
-           ▼
+           v
 ┌─────────────────────┐
 │  measures_enriched  │  ← Silver: long enriched with
 │  (long, classified) │     machine_type, measure_type, unit
 └──────────┬──────────┘
            │ update policy with pivot per type
-           ▼
+           v
 ┌─────────────────────┐
 │  measures_press_w   │  ← Gold: wide per type,
 │  measures_compr_w   │     ready for multivariate models
 │  measures_cnc_w     │
 └──────────┬──────────┘
            │ update policy with scoring (Python plugin)
-           ▼
+           v
 ┌─────────────────────┐
 │  anomalies          │  ← unified output in long format,
 │  (long, unified)    │     consumed by Activator and dashboards
