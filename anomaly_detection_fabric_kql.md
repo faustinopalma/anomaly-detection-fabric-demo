@@ -1,20 +1,20 @@
-# Anomaly Detection in Fabric Eventhouse — Guida completa con KQL
+# Anomaly Detection in Fabric Eventhouse — Complete KQL guide
 
-Questa guida copre tutte le strade per fare anomaly detection **dentro Fabric Eventhouse**, con scoring quasi real-time, sfruttando:
+This guide covers every available path for doing anomaly detection **inside Fabric Eventhouse**, with near real-time scoring, leveraging:
 
-1. Le **funzioni native KQL** per time series (la via più semplice e spesso sufficiente)
-2. Il **plugin `python()`** con modelli custom serializzati nella stessa Eventhouse
-3. La combinazione dei due con **update policy** + **Activator** per chiudere il loop di alerting
+1. The **native KQL time-series functions** (the simplest path, often sufficient on its own)
+2. The **`python()` plugin** with custom models serialized inside the same Eventhouse
+3. A combination of the two, plus **update policies** + **Activator**, to close the alerting loop
 
 ---
 
-## 1. Architettura di riferimento
+## 1. Reference architecture
 
-Il flusso end-to-end che useremo è sempre lo stesso, indipendentemente dall'algoritmo:
+The end-to-end flow is the same regardless of the algorithm:
 
 ```
 ┌──────────────┐    ┌────────────┐    ┌──────────────────┐    ┌──────────────┐    ┌───────────┐
-│ Macchine     │───▶│ Eventstream│───▶│ measures_raw     │───▶│ anomalies    │───▶│ Activator │
+│ Machines     │───▶│ Eventstream│───▶│ measures_raw     │───▶│ anomalies    │───▶│ Activator │
 │ OPC-UA / MQTT│    │            │    │ (Eventhouse)     │    │ (Eventhouse) │    │ (Reflex)  │
 └──────────────┘    └────────────┘    │  + update policy │    └──────────────┘    └───────────┘
                                       └──────────────────┘                              │
@@ -22,33 +22,33 @@ Il flusso end-to-end che useremo è sempre lo stesso, indipendentemente dall'alg
                                                                               Email / Teams / Webhook
 ```
 
-**Componenti:**
+**Components:**
 
-- **Eventstream** — porta dentro Eventhouse i dati di processo (Event Hubs, IoT Hub, MQTT, Kafka, custom app).
-- **`measures_raw`** — tabella di atterraggio in Eventhouse con i sample grezzi.
-- **Update policy** — funzione KQL che, ad ogni nuovo batch ingerito, applica il modello e scrive in `anomalies` solo i record anomali.
-- **`anomalies`** — tabella delle anomalie rilevate (input/output del modello).
-- **Activator (Reflex)** — osserva `anomalies` e fa partire le notifiche.
+- **Eventstream** — brings process data into Eventhouse (Event Hubs, IoT Hub, MQTT, Kafka, custom app).
+- **`measures_raw`** — landing table in Eventhouse with raw samples.
+- **Update policy** — KQL function that, on each new ingested batch, applies the model and writes only anomalous rows into `anomalies`.
+- **`anomalies`** — table of detected anomalies (model input/output).
+- **Activator (Reflex)** — watches `anomalies` and fires notifications.
 
 ---
 
-## 2. Prerequisiti e setup iniziale
+## 2. Prerequisites and initial setup
 
-### 2.1 Abilitare il plugin Python sull'Eventhouse
+### 2.1 Enabling the Python plugin on the Eventhouse
 
-Necessario solo per gli scenari custom (non per le funzioni native). Il plugin è **disabilitato di default** e va attivato dall'amministratore dell'Eventhouse:
+Required only for custom scenarios (not for native functions). The plugin is **disabled by default** and must be turned on by the Eventhouse administrator:
 
 `Eventhouse > Plugins > Python language extension: On`
 
-Le immagini disponibili oggi:
+Available images today:
 
-- **Python 3.10.8** + pacchetti data science / ML standard (numpy, pandas, scikit-learn, statsmodels, scipy…)
-- **Python 3.11.7** stessa cosa
-- **Python 3.11.7 DL** + tensorflow + torch + `time-series-anomaly-detector` (necessario per anomaly detection multivariata MVAD)
+- **Python 3.10.8** + standard data-science / ML packages (numpy, pandas, scikit-learn, statsmodels, scipy, …)
+- **Python 3.11.7** same as above
+- **Python 3.11.7 DL** + tensorflow + torch + `time-series-anomaly-detector` (required for multivariate MVAD anomaly detection)
 
-> ⚠️ Abilitare un plugin causa un **refresh della cache hot** dell'Eventhouse, che può richiedere fino a un'ora. Conviene farlo durante un periodo di basso carico.
+> ⚠️ Enabling a plugin causes a **hot-cache refresh** of the Eventhouse, which can take up to one hour. Do it during a low-load window.
 
-### 2.2 Tabelle di base
+### 2.2 Base tables
 
 ```kusto
 .create table measures_raw (
@@ -77,66 +77,66 @@ Le immagini disponibili oggi:
     name: string,
     version: string,
     created_at: datetime,
-    model: string,           // pickle serializzato in base64
-    features: dynamic,       // lista feature
-    metadata: dynamic        // metriche, info di training
+    model: string,           // pickle serialized as base64
+    features: dynamic,       // feature list
+    metadata: dynamic        // metrics, training info
 )
 ```
 
-### 2.3 Streaming vs queued ingestion (vincolo IMPORTANTE)
+### 2.3 Streaming vs queued ingestion (IMPORTANT constraint)
 
-Il plugin Python **non funziona dentro update policy alimentate da streaming ingestion**. Funziona solo con:
+The Python plugin **does not work inside update policies fed by streaming ingestion**. It only works with:
 
-- Queued (batch) ingestion — il default per Eventstream
-- `.set-or-append` da query
+- Queued (batch) ingestion — the default for Eventstream
+- `.set-or-append` from a query
 
-Se l'Eventstream è configurato in modalità streaming pura, lo scoring va fatto in una **tabella intermedia** alimentata in batch. Per la maggior parte dei casi industriali (sample ogni N secondi/minuti) la queued ingestion basta e avanza con latenze tipiche di 5-30 secondi.
+If the Eventstream is configured in pure streaming mode, scoring must be done in an **intermediate table** fed in batch. For most industrial cases (samples every N seconds/minutes) queued ingestion is more than enough, with typical latencies of 5-30 seconds.
 
 ---
 
-## 3. Strada A — Solo funzioni native KQL (la più semplice)
+## 3. Path A — Native KQL functions only (the simplest)
 
-Le funzioni native fanno **decomposizione stagionale + analisi degli outlier sui residui** completamente in-engine, vettorializzate, su migliaia di serie in parallelo. Niente sandbox Python, niente modelli da gestire.
+The native functions perform **seasonal decomposition + outlier analysis on residuals** entirely in-engine, vectorized, across thousands of series in parallel. No Python sandbox, no models to manage.
 
-### 3.1 Funzioni chiave
+### 3.1 Key functions
 
-| Funzione | A cosa serve |
+| Function | Purpose |
 |---|---|
-| `make-series` | Costruisce array temporali allineati su bin temporali |
-| `series_decompose()` | Scompone in `baseline` (seasonal+trend), `seasonal`, `trend`, `residual` |
-| `series_decompose_anomalies()` | Decomposizione + flag anomalie sui residui (Tukey test) |
-| `series_decompose_forecast()` | Forecast estrapolando seasonal+trend |
-| `series_outliers()` | Outlier detection su una serie generica (Tukey) |
-| `series_periods_detect()` | Rileva la stagionalità di una serie |
+| `make-series` | Builds time-aligned arrays bucketed on time bins |
+| `series_decompose()` | Decomposes into `baseline` (seasonal+trend), `seasonal`, `trend`, `residual` |
+| `series_decompose_anomalies()` | Decomposition + anomaly flagging on residuals (Tukey test) |
+| `series_decompose_forecast()` | Forecast extrapolating seasonal+trend |
+| `series_outliers()` | Outlier detection on a generic series (Tukey) |
+| `series_periods_detect()` | Detects the seasonality of a series |
 
-### 3.2 Sintassi `series_decompose_anomalies`
+### 3.2 `series_decompose_anomalies` syntax
 
 ```
 series_decompose_anomalies(Series, [Threshold, Seasonality, Trend, Test_points, AD_method, Seasonality_threshold])
 ```
 
-| Parametro | Default | Significato |
+| Parameter | Default | Meaning |
 |---|---|---|
-| `Threshold` | `1.5` | Sensibilità (più alto = meno anomalie) |
-| `Seasonality` | `-1` | `-1` = auto-detect; `0` = nessuna; intero = numero di bin per ciclo |
-| `Trend` | `'avg'` | `'avg'` (solo media), `'linefit'` (regressione lineare), `'none'` |
-| `Test_points` | `0` | Punti finali da escludere dal training |
-| `AD_method` | `'ctukey'` | `'ctukey'` (Tukey clippato) o `'tukey'` |
-| `Seasonality_threshold` | `0.6` | Soglia score per auto-seasonality |
+| `Threshold` | `1.5` | Sensitivity (higher = fewer anomalies) |
+| `Seasonality` | `-1` | `-1` = auto-detect; `0` = none; integer = number of bins per cycle |
+| `Trend` | `'avg'` | `'avg'` (mean only), `'linefit'` (linear regression), `'none'` |
+| `Test_points` | `0` | Trailing points to exclude from training |
+| `AD_method` | `'ctukey'` | `'ctukey'` (clipped Tukey) or `'tukey'` |
+| `Seasonality_threshold` | `0.6` | Score threshold for auto-seasonality |
 
-Restituisce **tre serie** allineate alla serie di input:
+It returns **three series** aligned to the input:
 
-- `ad_flag` — ternaria: `+1` (spike), `-1` (dip), `0` (normale)
-- `ad_score` — score continuo dell'anomalia (più alto = più anomalo)
-- `baseline` — la curva attesa (utile per visualizzare lo "scostamento")
+- `ad_flag` — ternary: `+1` (spike), `-1` (dip), `0` (normal)
+- `ad_score` — continuous anomaly score (higher = more anomalous)
+- `baseline` — the expected curve (useful to visualize the "deviation")
 
-### 3.3 Esempio: anomaly detection su tutte le macchine
+### 3.3 Example: anomaly detection across all machines
 
 ```kusto
 let lookback   = 7d;
 let bin_size   = 1m;
 let threshold  = 2.5;
-let last_only  = 5m;     // periodo di interesse "live"
+let last_only  = 5m;     // "live" window of interest
 //
 measures_raw
 | where ts > ago(lookback)
@@ -162,21 +162,21 @@ measures_raw
           avg_press,baseline_press,anomaly_press,score_press
 ```
 
-Il pattern `make-series … | series_decompose_anomalies | mv-expand` è il caso d'uso classico. Funziona benissimo per **anomalie univariate**, una metrica per volta, eventualmente combinando con OR/AND.
+The `make-series … | series_decompose_anomalies | mv-expand` pattern is the classic use case. It works very well for **univariate anomalies**, one metric at a time, optionally combined with OR/AND.
 
-### 3.4 Quando usarla
+### 3.4 When to use it
 
-| Scenario | Adatto? |
+| Scenario | Suitable? |
 |---|---|
-| Una/poche metriche per macchina, anomalie su valore | ✅ |
-| Pattern stagionali (turni, settimana, ciclo macchina) | ✅ con `linefit` + auto-seasonality |
-| Centinaia/migliaia di serie | ✅ è vettorializzata |
-| Anomalia "multivariata" (correlazione tra sensori) | ❌ una alla volta, non vede correlazioni |
-| Pattern complessi (forme di segnale anomale) | ❌ serve modello custom |
+| One/few metrics per machine, value-based anomalies | ✅ |
+| Seasonal patterns (shifts, weekly, machine cycle) | ✅ with `linefit` + auto-seasonality |
+| Hundreds/thousands of series | ✅ it is vectorized |
+| "Multivariate" anomalies (cross-sensor correlation) | ❌ one at a time, doesn't see correlations |
+| Complex patterns (anomalous waveforms) | ❌ requires a custom model |
 
-### 3.5 Wrappare in update policy
+### 3.5 Wrapping it in an update policy
 
-Per attivare il near-real-time, si trasforma la query in **funzione** + **update policy**:
+To enable near real-time, turn the query into a **function** + **update policy**:
 
 ```kusto
 .create-or-alter function with (folder='ml', skipvalidation='true')
@@ -193,7 +193,7 @@ DetectAnomaliesNative() {
                 ad_flag to typeof(int), 
                 ad_score to typeof(real), 
                 baseline to typeof(real)
-    | where ad_flag != 0 and ts > ago(bin_size * 2)   // solo l'ultimo bin
+    | where ad_flag != 0 and ts > ago(bin_size * 2)   // last bin only
     | project machine_id, ts, 
               temp = avg_temp, vib = real(null), press = real(null), rpm = real(null),
               score = ad_score, is_anomaly = true,
@@ -210,50 +210,50 @@ DetectAnomaliesNative() {
    "PropagateIngestionProperties": false}]'
 ```
 
-Da questo momento ogni nuovo batch in `measures_raw` triggera la funzione, e le righe anomale finiscono in `anomalies`.
+From now on every new batch into `measures_raw` triggers the function, and anomalous rows land in `anomalies`.
 
-> ⚠️ Una update policy con `make-series` su finestra di lookback è un po' più costosa di una sul singolo record perché ad ogni trigger ricostruisce la serie. Per alti throughput (>10k eventi/sec) conviene il pattern Python con stato precaricato.
+> ⚠️ An update policy with `make-series` over a lookback window is slightly more expensive than one operating on a single record because it rebuilds the series on each trigger. For high throughput (>10k events/sec) the Python pattern with pre-loaded state is preferable.
 
 ---
 
-## 4. Strada B — Modello custom in Python via plugin `python()`
+## 4. Path B — Custom Python model via the `python()` plugin
 
-È la strada per modelli che non si esprimono come decomposizione stagionale: Isolation Forest, One-Class SVM, autoencoder, gradient boosting, ecc.
+This is the path for models that are not expressible as seasonal decomposition: Isolation Forest, One-Class SVM, autoencoders, gradient boosting, etc.
 
-### 4.1 Come funziona il plugin Python
+### 4.1 How the Python plugin works
 
 ```kusto
 T 
 | evaluate python(
-    typeof(*, score:real, is_anomaly:bool),   // schema di output
-    'python_code_string',                      // codice
-    bag_pack('param1', value1, ...),           // dizionario kargs
-    external_artifacts                         // opzionale, file da blob
+    typeof(*, score:real, is_anomaly:bool),   // output schema
+    'python_code_string',                      // code
+    bag_pack('param1', value1, ...),           // kargs dictionary
+    external_artifacts                         // optional, files from blob
 )
 ```
 
-**Variabili reserved:**
+**Reserved variables:**
 
-- `df` — pandas DataFrame con i dati di input (le righe che arrivano dal pipe)
-- `kargs` — dizionario con i parametri passati con `bag_pack`
-- `result` — pandas DataFrame con l'output (deve matchare lo schema dichiarato)
+- `df` — pandas DataFrame containing the input data (the rows arriving from the pipe)
+- `kargs` — dictionary with parameters passed via `bag_pack`
+- `result` — pandas DataFrame with the output (must match the declared schema)
 
-**Limiti del sandbox da tenere a mente:**
+**Sandbox limits to keep in mind:**
 
-- Memoria limitata (ordine di GB, dipende dalla SKU dell'Eventhouse)
-- Niente accesso di rete arbitrario
-- I pacchetti devono essere in immagine, oppure caricati come `external_artifacts` zip
-- Il timeout è breve (decine di secondi)
+- Limited memory (order of GB, depends on Eventhouse SKU)
+- No arbitrary network access
+- Packages must be in the image, or shipped via `external_artifacts` zip
+- Short timeout (tens of seconds)
 
-### 4.2 Pattern: modello salvato dentro Eventhouse
+### 4.2 Pattern: model stored inside Eventhouse
 
-Lo schema standard per scoring in real-time:
+Standard schema for real-time scoring:
 
-1. **Training offline** (notebook Spark Fabric): legge lo storico, addestra, **serializza il modello in pickle**, lo encoda in base64 e scrive una riga nella tabella `models`.
-2. **Funzione di scoring** in KQL legge l'ultimo modello dalla tabella, lo passa al plugin Python tramite `kargs`, scora il batch.
-3. **Update policy** sulla tabella raw invoca la funzione e scrive in `anomalies`.
+1. **Offline training** (Fabric Spark notebook): reads history, trains, **serializes the model as pickle**, base64-encodes it, and writes a row to the `models` table.
+2. **Scoring function** in KQL reads the latest model from the table and passes it to the Python plugin via `kargs`, scoring the batch.
+3. **Update policy** on the raw table calls the function and writes into `anomalies`.
 
-#### 4.2.1 Notebook di training (Fabric Spark)
+#### 4.2.1 Training notebook (Fabric Spark)
 
 ```python
 import mlflow
@@ -263,13 +263,13 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 
-# 1) Leggi storico via OneLake (Eventhouse → Delta su OneLake è on-demand)
+# 1) Read history via OneLake (Eventhouse → Delta on OneLake is on-demand)
 abfss_uri = "abfss://<workspace>@onelake.dfs.fabric.microsoft.com/<eventhouse>.KQL/Tables/measures_raw"
 df = spark.read.format("delta").load(abfss_uri).toPandas()
 
-# 2) Filtra periodo "normal" e feature
+# 2) Filter "normal" period and features
 features = ["temp", "vib", "press", "rpm"]
-df_train = df[df["ts"] < "2026-04-01"]  # periodo di nominale
+df_train = df[df["ts"] < "2026-04-01"]  # nominal period
 X = df_train[features].values
 
 # 3) Pipeline: scaler + isolation forest
@@ -284,19 +284,19 @@ pipe = Pipeline([
 ])
 pipe.fit(X)
 
-# 4) Logga su MLflow per lifecycle
+# 4) Log to MLflow for lifecycle
 with mlflow.start_run() as run:
     mlflow.sklearn.log_model(pipe, "iforest")
     mlflow.log_params({"n_estimators": 200, "contamination": 0.01})
     mlflow.log_metric("n_train_samples", len(X))
     run_id = run.info.run_id
 
-# 5) Serializza per Eventhouse
+# 5) Serialize for Eventhouse
 model_bytes = pickle.dumps(pipe)
 model_b64 = base64.b64encode(model_bytes).decode("ascii")
-print(f"Model size: {len(model_bytes)/1024:.1f} KB")  # tieni occhio < 5-10 MB
+print(f"Model size: {len(model_bytes)/1024:.1f} KB")  # keep an eye < 5-10 MB
 
-# 6) Push in tabella `models` via Kqlmagic / Kusto SDK
+# 6) Push into the `models` table via Kqlmagic / Kusto SDK
 from azure.kusto.data import KustoClient, KustoConnectionStringBuilder
 from azure.kusto.ingest import QueuedIngestClient, IngestionProperties, DataFormat
 
@@ -316,13 +316,13 @@ row = pd.DataFrame([{
     "metadata": json.dumps({"n_estimators": 200, "contamination": 0.01})
 }])
 
-# Ingestion in tabella models
+# Ingest into models table
 ingest_client = QueuedIngestClient(kcsb)
 props = IngestionProperties(database=db, table="models", data_format=DataFormat.CSV)
 ingest_client.ingest_from_dataframe(row, ingestion_properties=props)
 ```
 
-#### 4.2.2 Funzione KQL di scoring
+#### 4.2.2 KQL scoring function
 
 ```kusto
 .create-or-alter function with (folder='ml', skipvalidation='true')
@@ -348,12 +348,12 @@ model = pickle.loads(base64.b64decode(kargs["model_b64"]))
 features = list(kargs["features"])
 
 X = df[features].values
-# decision_function: più alto = più normale (sklearn convention)
+# decision_function: higher = more normal (sklearn convention)
 scores = model.decision_function(X)
-preds  = model.predict(X)   # -1 anomalo, +1 normale
+preds  = model.predict(X)   # -1 anomalous, +1 normal
 
 result = df.copy()
-result["score"] = -scores                  # invertito: più alto = più anomalo
+result["score"] = -scores                  # inverted: higher = more anomalous
 result["is_anomaly"] = (preds == -1)
 result["model_version"] = kargs["version"]
 result["detected_at"] = datetime.utcnow()
@@ -374,13 +374,13 @@ result["detected_at"] = datetime.utcnow()
    "PropagateIngestionProperties": false}]'
 ```
 
-Tutti i nuovi record che entrano in `measures_raw` vengono scorati; solo gli anomali finiscono in `anomalies`. La latenza tipica è di pochi secondi dal momento dell'ingestion.
+Every new record entering `measures_raw` is scored; only anomalous rows land in `anomalies`. Typical latency is a few seconds from ingestion.
 
-### 4.3 Pattern: feature engineering temporale
+### 4.3 Pattern: time-series feature engineering
 
-Spesso l'anomalia non è sul singolo punto ma sulla forma del segnale (rolling stats, delta, derivata, FFT). Due strade:
+Often the anomaly is not on a single point but on the signal shape (rolling stats, delta, derivative, FFT). Two paths:
 
-**Opzione A — feature engineering dentro KQL prima del plugin**
+**Option A — feature engineering inside KQL before the plugin**
 
 ```kusto
 .create-or-alter function ScoreWithFeaturesV1(window_minutes:int = 5) {
@@ -390,16 +390,16 @@ Spesso l'anomalia non è sul singolo punto ma sulla forma del segnale (rolling s
         order by ts asc
         | extend 
             temp_roll_mean  = row_window_session(temp,  window_minutes * 1m, 1m, ts != prev(ts)),
-            temp_roll_std   = todouble(0),  // calcolato dentro Python
+            temp_roll_std   = todouble(0),  // computed inside Python
             temp_delta      = temp - prev(temp, 1)
     )
     | invoke ScoreWithIForest()
 }
 ```
 
-**Opzione B — feature engineering dentro Python**
+**Option B — feature engineering inside Python**
 
-Più flessibile ma il sandbox vede solo le righe del batch corrente. Per finestre lunghe servono **dati di lookback nel batch**, quindi la query passa più contesto del minimo.
+More flexible, but the sandbox sees only the rows of the current batch. For long windows you need **lookback data in the batch**, so the query passes more context than the bare minimum.
 
 ```kusto
 let lookback_min = 5m;
@@ -426,16 +426,16 @@ X = df[feat].fillna(0).values
 df["score"] = -model.decision_function(X)
 df["is_anomaly"] = model.predict(X) == -1
 
-# Mantieni solo i record "freschi" (gli altri erano lookback)
+# Keep only "fresh" records (the others were lookback)
 result = df[df["ts"] >= pd.Timestamp.utcnow() - pd.Timedelta(minutes=2)].copy()
     ```,
     bag_pack('model_b64', toscalar(models | top 1 by created_at desc | project model))
 )
 ```
 
-### 4.4 Pattern: modello pesante via `external_artifacts`
+### 4.4 Pattern: heavy model via `external_artifacts`
 
-Se il pickle supera qualche MB (autoencoder, modelli ONNX), conviene **non** salvarlo in tabella ma in un blob/Lakehouse e referenziarlo come artefatto esterno:
+If the pickle exceeds a few MB (autoencoders, ONNX models), it is preferable **not** to store it in the table but in a blob/Lakehouse and reference it as an external artifact:
 
 ```kusto
 samples
@@ -445,7 +445,7 @@ samples
 import pickle
 with open(r"C:\Temp\autoencoder.pkl", "rb") as f:
     model = pickle.load(f)
-# ... resto dello scoring
+# ... rest of the scoring
     ```,
     bag_pack(),
     external_artifacts = dynamic({
@@ -454,94 +454,94 @@ with open(r"C:\Temp\autoencoder.pkl", "rb") as f:
 )
 ```
 
-Il file viene scaricato nel sandbox e disponibile come `C:\Temp\<nome>`.
+The file is downloaded into the sandbox and made available at `C:\Temp\<name>`.
 
-### 4.5 Pattern: ONNX (consigliato per modelli pesanti / cross-framework)
+### 4.5 Pattern: ONNX (recommended for heavy / cross-framework models)
 
-ONNX è particolarmente adatto perché:
+ONNX is particularly well suited because:
 
-- Inferenza più veloce di sklearn nativo
-- Indipendente dal framework di training (PyTorch, TF, sklearn)
-- File compatto, deserializzazione rapida
+- Inference is faster than native sklearn
+- Independent of the training framework (PyTorch, TF, sklearn)
+- Compact file, fast deserialization
 
 ```python
-# In notebook training: converti sklearn → ONNX
+# In the training notebook: convert sklearn → ONNX
 from skl2onnx import to_onnx
 onx = to_onnx(pipe, X[:1].astype(np.float32))
 with open("/lakehouse/default/Files/iforest.onnx", "wb") as f:
     f.write(onx.SerializeToString())
 ```
 
-Poi in KQL si usa `external_artifacts` puntando al file ONNX e si carica con `onnxruntime` nel sandbox.
+In KQL, use `external_artifacts` pointing at the ONNX file and load it with `onnxruntime` inside the sandbox.
 
 ---
 
-## 5. Strada C — Multivariata "managed" (preview): `series_mv_*` + `time-series-anomaly-detector`
+## 5. Path C — Managed multivariate (preview): `series_mv_*` + `time-series-anomaly-detector`
 
-Microsoft ha rilasciato una capability multivariata managed che usa internamente un modello di Microsoft Research. Va abilitato il plugin **Python 3.11.7 DL** che include il pacchetto `time-series-anomaly-detector`.
+Microsoft has shipped a managed multivariate capability that internally uses a Microsoft Research model. You must enable the **Python 3.11.7 DL** plugin, which includes the `time-series-anomaly-detector` package.
 
-L'approccio:
+The approach:
 
-1. Training in notebook Spark con il pacchetto, modello salvato su MLflow
-2. Path del modello (ABFSS) usato in KQL come `external_artifacts`
-3. Funzione di scoring richiama il modello sul batch in arrivo
+1. Training in a Spark notebook with the package, model saved to MLflow
+2. Model path (ABFSS) used in KQL as `external_artifacts`
+3. A scoring function invokes the model on the incoming batch
 
-È la strada più "no-code-side" se il caso d'uso è classico (correlazione tra sensori, deriva di processo). Vincolo: occupa più risorse e richiede l'immagine DL (scelta di lock-in sulla SKU).
+This is the most "no-code-side" path if the use case is classic (cross-sensor correlation, process drift). Constraint: it consumes more resources and requires the DL image (lock-in on the SKU choice).
 
 ---
 
-## 6. Update policy — meccanismi e best practice
+## 6. Update policies — mechanics and best practices
 
-### 6.1 Anatomia
+### 6.1 Anatomy
 
 ```json
 {
   "IsEnabled": true,
-  "Source": "measures_raw",                  // tabella di input
-  "Query": "ScoreWithIForest(measures_raw)", // funzione che produce le righe da scrivere
-  "IsTransactional": false,                  // se true, fallimento = rollback ingestion
-  "PropagateIngestionProperties": false      // propaga tag/metadata dall'ingestion
+  "Source": "measures_raw",                  // input table
+  "Query": "ScoreWithIForest(measures_raw)", // function that produces the rows to write
+  "IsTransactional": false,                  // if true, failure = ingestion rollback
+  "PropagateIngestionProperties": false      // propagates tags/metadata from ingestion
 }
 ```
 
-### 6.2 Punti di attenzione
+### 6.2 Things to watch out for
 
-- **`IsTransactional`** — su `false` per scoring ML: se il modello fallisce, la riga raw va comunque persistita. Su `true` solo se preferisci perdere il dato grezzo che non poter scorare.
-- **Funzioni con stato (lookup tabella `models`)** — la query viene rieseguita ad ogni batch, quindi il `toscalar(models | ...)` viene rivalutato ogni volta. È un'OK perché tieni una sola riga "ultima" e il costo è trascurabile.
-- **Update policy a cascata** — puoi avere policy che leggono da `anomalies` e scrivono in `anomalies_aggregated`, con regole tipo "se anomalia ripetuta in finestra X allora alarm di livello superiore".
-- **Idempotenza** — se reingerisci lo stesso file, l'update policy gira di nuovo. Per evitare doppioni in `anomalies`, includi una chiave naturale + dedup periodico, oppure abilita `materialized-view` con `arg_max` come pattern di consolidamento.
+- **`IsTransactional`** — set to `false` for ML scoring: if the model fails, the raw row must still be persisted. Set to `true` only if you'd rather lose the raw datum than not score it.
+- **Stateful functions (lookup of the `models` table)** — the query is re-executed on every batch, so the `toscalar(models | ...)` is re-evaluated each time. That's OK because you keep a single "latest" row and the cost is negligible.
+- **Cascading update policies** — you can have policies that read from `anomalies` and write to `anomalies_aggregated`, with rules like "if a repeated anomaly within window X then a higher-severity alarm".
+- **Idempotency** — if you re-ingest the same file the update policy runs again. To avoid duplicates in `anomalies`, include a natural key + periodic dedup, or enable a `materialized-view` with `arg_max` as a consolidation pattern.
 
-### 6.3 Verifica e debug
+### 6.3 Verification and debugging
 
 ```kusto
-// Stato delle update policy
+// Update policy state
 .show table anomalies policy update
 
-// Failure delle update policy nelle ultime ore
+// Update policy failures in the last hours
 .show ingestion failures
 | where Table == "anomalies" and FailedOn > ago(1h)
 
-// Audit di cosa la funzione produrrebbe SENZA scriverla
+// Audit what the function would produce WITHOUT writing it
 ScoreWithIForest(measures_raw | where ts > ago(5m)) | take 100
 ```
 
 ---
 
-## 7. Activator (Reflex) — chiudere il loop sulle notifiche
+## 7. Activator (Reflex) — closing the loop on notifications
 
-Una volta che `anomalies` si popola, l'**Activator** è il pezzo che fa partire l'alert.
+Once `anomalies` is being populated, the **Activator** is the piece that fires the alert.
 
-### 7.1 Due modalità
+### 7.1 Two modes
 
-**A. Eventstream → Activator (sub-secondo)**
+**A. Eventstream → Activator (sub-second)**
 
-Si aggiunge l'Activator come destinazione dell'Eventstream stesso, oppure si aggancia l'Activator a un Eventstream che legge da `anomalies` (via OneLake availability + KQL DB source). Latenza: sotto al secondo. Adatto per alert "qualunque anomalia → notifica".
+Add the Activator as a destination of the Eventstream itself, or attach the Activator to an Eventstream that reads from `anomalies` (via OneLake availability + KQL DB source). Latency: under a second. Suitable for "any anomaly → notify" alerts.
 
-**B. KQL Queryset trigger su `anomalies` (poll, ~minuti)**
+**B. KQL Queryset trigger on `anomalies` (poll, ~minutes)**
 
-L'Activator esegue periodicamente (es. ogni 1-5 min) una query KQL che restituisce le anomalie da notificare. Permette logica complessa: "almeno N anomalie nella stessa macchina in 10 minuti", "anomalia su temp seguita da anomalia su vib entro 2 min", ecc. Latenza: pari al periodo di poll.
+The Activator periodically (e.g. every 1-5 min) runs a KQL query that returns the anomalies to notify. This allows complex logic: "at least N anomalies on the same machine in 10 minutes", "anomaly on temp followed by anomaly on vib within 2 min", etc. Latency: equal to the poll period.
 
-### 7.2 Esempio query di trigger con anti-flood
+### 7.2 Example trigger query with anti-flood
 
 ```kusto
 let window = 10m;
@@ -557,41 +557,41 @@ anomalies
 | project machine_id, n_anomalies = n, last_score, last_ts
 ```
 
-Sull'output di questa query l'Activator può configurare:
+On the output of this query the Activator can configure:
 
-- Condizione: `n_anomalies >= 3`
-- Action: email / Teams / Power Automate / webhook custom / esecuzione di una pipeline o notebook Fabric
+- Condition: `n_anomalies >= 3`
+- Action: email / Teams / Power Automate / custom webhook / run a Fabric pipeline or notebook
 
-### 7.3 Caveat
-- L'Activator deve fare polling più frequente della finestra della query, altrimenti rischi di perdere alert.
-- Non è "exactly-once": se due cicli si sovrappongono nella finestra, può duplicare. Per anomalie è in genere accettabile (meglio doppio che mancato), ma se serve dedup, usa una tabella di stato a parte.
+### 7.3 Caveats
+- The Activator must poll more frequently than the query window, otherwise alerts may be lost.
+- It is not "exactly-once": if two cycles overlap inside the window, it can duplicate. For anomalies that's usually acceptable (better double than missed), but if you need dedup, use a separate state table.
 
 ---
 
-## 8. Operazioni — retraining, drift, versionamento
+## 8. Operations — retraining, drift, versioning
 
-### 8.1 Retraining schedulato
+### 8.1 Scheduled retraining
 
-Una **Pipeline Fabric** che ogni N giorni:
+A **Fabric Pipeline** that every N days:
 
-1. Lancia il notebook di training
-2. Il notebook scrive una nuova riga in `models` con `version` nuovo
-3. La funzione di scoring prende automaticamente l'ultima (`top 1 by created_at desc`)
+1. Runs the training notebook
+2. The notebook writes a new row into `models` with a new `version`
+3. The scoring function automatically picks the latest (`top 1 by created_at desc`)
 
-Niente da modificare in KQL: il deploy è "il modello è nella tabella".
+Nothing to change in KQL: the deploy is "the model is in the table".
 
-### 8.2 Versionamento sicuro (canary)
+### 8.2 Safe versioning (canary)
 
-Tieni una colonna `is_active` nella tabella `models` e una funzione che legge solo modelli `is_active == true`. Per validare un nuovo modello:
+Keep an `is_active` column in the `models` table and a function that reads only models with `is_active == true`. To validate a new model:
 
-1. Inserisci v2 con `is_active = false`
-2. Crea funzione di scoring `ScoreCanary` che usa esplicitamente `version == "v2"`, scrivi in `anomalies_canary`
-3. Confronta v1 vs v2 su dati live per qualche giorno
-4. Quando OK, swap dell'`is_active`
+1. Insert v2 with `is_active = false`
+2. Create a `ScoreCanary` scoring function that explicitly uses `version == "v2"` and writes to `anomalies_canary`
+3. Compare v1 vs v2 on live data for a few days
+4. When OK, swap `is_active`
 
 ### 8.3 Drift monitoring
 
-Un altro update policy / job schedulato che confronta la distribuzione delle feature recenti con quella di training:
+Another update policy / scheduled job that compares the recent feature distribution against the training one:
 
 ```kusto
 .create-or-alter function MonitorDrift() {
@@ -607,46 +607,46 @@ Un altro update policy / job schedulato che confronta la distribuzione delle fea
 }
 ```
 
-Output → tabella `drift_alerts` → un altro Activator. Senza questo, in produzione industriale dopo qualche mese di solito iniziano falsi positivi/negativi senza che te ne accorga.
+Output → `drift_alerts` table → another Activator. Without this, in industrial production, after a few months you typically start getting false positives/negatives without noticing.
 
 ### 8.4 Eventhouse monitoring
 
-Abilitare il **Workspace Monitoring** di Fabric ti dà tabelle `EventhouseCommandLogs`, `EventhouseDataOperations`, `EventhouseIngestionResultLogs` dove puoi vedere:
+Enabling Fabric **Workspace Monitoring** gives you the `EventhouseCommandLogs`, `EventhouseDataOperations`, `EventhouseIngestionResultLogs` tables, where you can see:
 
-- Latenza di esecuzione delle update policy
-- Failure dello scoring (es. modello incompatibile, OOM nel sandbox)
-- Volume di ingestion vs scoring
+- Update policy execution latency
+- Scoring failures (e.g. incompatible model, sandbox OOM)
+- Ingestion volume vs scoring
 
-Da queste si possono costruire altri Activator per "il modello sta fallendo".
+From these you can build additional Activators for "the model is failing".
 
 ---
 
-## 9. Riepilogo decisionale — quale strada per quale caso
+## 9. Decision summary — which path for which case
 
-| Caso | Strada consigliata |
+| Case | Recommended path |
 |---|---|
-| Una metrica per macchina, pattern stagionale chiaro | **A** — `series_decompose_anomalies` |
-| Tante metriche indipendenti, anomalie su valore | **A** ripetuta per ogni metrica |
-| Correlazione tra sensori, modello custom | **B** — Isolation Forest in pickle + update policy |
-| Pattern di forma (forme di onda, vibrazioni) | **B** — autoencoder via ONNX/external_artifacts |
-| Multivariato classico managed | **C** — `time-series-anomaly-detector` |
-| Modello molto pesante (DL grossa) | Endpoint esterno (Azure ML) — non trattato qui |
+| One metric per machine, clear seasonal pattern | **A** — `series_decompose_anomalies` |
+| Many independent metrics, value-based anomalies | **A** repeated for each metric |
+| Cross-sensor correlation, custom model | **B** — Isolation Forest in pickle + update policy |
+| Shape patterns (waveforms, vibrations) | **B** — autoencoder via ONNX/external_artifacts |
+| Classic managed multivariate | **C** — `time-series-anomaly-detector` |
+| Very heavy model (large DL) | External endpoint (Azure ML) — not covered here |
 
-Il consiglio operativo: **partire da A** per avere una baseline in produzione in pochi giorni, poi affiancare **B** per i casi che A non copre. Le due strade convivono benissimo: stessa tabella `anomalies`, colonna `model_version` che distingue chi ha generato cosa.
+Operational advice: **start with A** to have a baseline in production within days, then complement with **B** for cases A doesn't cover. The two paths coexist nicely: same `anomalies` table, `model_version` column distinguishing who produced what.
 
 ---
 
-## 10. Checklist di implementazione
+## 10. Implementation checklist
 
-- [ ] Eventhouse creato, OneLake availability ON
-- [ ] Tabelle `measures_raw`, `anomalies`, `models` create con schema definitivo
-- [ ] Eventstream agganciato a `measures_raw` (queued ingestion)
-- [ ] Plugin Python abilitato (3.11.7 o DL se serve)
-- [ ] Funzione native KQL `DetectAnomaliesNative` creata e testata su storico
-- [ ] Notebook di training che scrive in `models` (e MLflow)
-- [ ] Funzione `ScoreWithIForest` testata in modalità "ad-hoc" su batch storici
-- [ ] Update policy attivata su `anomalies` con `IsTransactional=false`
-- [ ] Activator agganciato ad `anomalies` con anti-flood
-- [ ] Pipeline schedulata di retraining (settimanale/mensile)
-- [ ] Drift monitoring + Activator di livello 2
-- [ ] Workspace monitoring abilitato per visibilità operativa
+- [ ] Eventhouse created, OneLake availability ON
+- [ ] `measures_raw`, `anomalies`, `models` tables created with the final schema
+- [ ] Eventstream attached to `measures_raw` (queued ingestion)
+- [ ] Python plugin enabled (3.11.7 or DL if needed)
+- [ ] Native KQL function `DetectAnomaliesNative` created and tested on history
+- [ ] Training notebook that writes into `models` (and MLflow)
+- [ ] `ScoreWithIForest` function tested in "ad-hoc" mode on historical batches
+- [ ] Update policy enabled on `anomalies` with `IsTransactional=false`
+- [ ] Activator attached to `anomalies` with anti-flood
+- [ ] Scheduled retraining pipeline (weekly/monthly)
+- [ ] Drift monitoring + tier-2 Activator
+- [ ] Workspace monitoring enabled for operational visibility

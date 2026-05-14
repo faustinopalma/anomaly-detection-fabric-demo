@@ -1,57 +1,66 @@
-# Telemetry simulator
+# tools/
 
-`simulate_machines.py` invia in tempo reale misurazioni sintetiche da N
-macchine industriali (CNC / pressa / motori) all'Eventstream
-`es_machines` di Fabric, usando l'SDK `azure-eventhub` (l'endpoint
-custom dell'Eventstream è Event Hubs compatibile).
+Python scripts for Fabric-side provisioning (Eventstream source/destination
+creation, `.kql` execution). The simulator itself has been moved into two
+dedicated folders:
 
-## 1. Crea il Custom Endpoint nell'Eventstream
+- [`../simulator-local`](../simulator-local) — local dev/debug runs
+- [`../simulator-cloud`](../simulator-cloud) — always-on deployment on Azure Container Apps
 
-`scripts/deploy.ps1` crea l'Eventstream vuoto. Per riceverere dati
-dall'esterno serve aggiungere una sorgente di tipo **Custom App / Custom
+## Telemetry simulator (legacy section, now in `simulator-local/`)
+
+`simulate_machines.py` sends synthetic measurements in real time from N
+industrial machines (CNC / press / motors) to the Fabric Eventstream
+`es_machines`, using the `azure-eventhub` SDK (the Eventstream custom
+endpoint is Event Hubs compatible).
+
+## 1. Create the Custom Endpoint in the Eventstream
+
+`scripts/deploy.ps1` creates an empty Eventstream. To receive data from
+the outside you need to add a source of type **Custom App / Custom
 Endpoint**:
 
-1. Portal Fabric → workspace `anomaly-detection-dev` → apri
+1. Fabric portal → workspace `anomaly-detection-dev` → open
    `es_machines.Eventstream`.
-2. Pulsante **+ Add source** → **Custom App** → nome `sim_local` → **Add**.
-3. Clicca sul nodo `sim_local` appena creato → tab **Details** → scheda
-   **Event Hub** → pagina **SAS Key Authentication**.
-4. Copia il valore di **Connection string-primary key**. Ha questo formato:
+2. **+ Add source** → **Custom App** → name `sim_local` → **Add**.
+3. Click the freshly created `sim_local` node → **Details** tab →
+   **Event Hub** card → **SAS Key Authentication** page.
+4. Copy the **Connection string-primary key** value. Format:
 
        Endpoint=sb://eventstream-xxxx.servicebus.windows.net/;SharedAccessKeyName=key_xxx;SharedAccessKey=xxxx;EntityPath=es_xxxx
 
-5. Incolla la stringa in `.env`:
+5. Paste the string into `.env`:
 
        EVENTSTREAM_CONNECTION_STRING=Endpoint=sb://...
 
-   (Il file `.env` è gitignored — la connection string non finisce nel repo.)
+   (The `.env` file is gitignored — the connection string never lands in the repo.)
 
-## 2. Installa le dipendenze
+## 2. Install dependencies
 
-Dal venv già usato per il deploy:
+From the same venv used for the deploy:
 
 ```pwsh
 .\.venv\Scripts\Activate.ps1
-pip install -r tools/requirements-sim.txt
+pip install -r simulator-local/requirements.txt
 ```
 
-## 3. Esegui
+## 3. Run
 
 ```pwsh
-# Default: 5 macchine, 1 sample/sec per sensore, infinito (Ctrl-C per fermare)
-python tools/simulate_machines.py
+# Default: 5 machines, 1 sample/sec per sensor, infinite (Ctrl-C to stop)
+python simulator-local/simulate_machines.py
 
-# 10 macchine, 5 sample/sec/sensore, 2 minuti, anomalie più frequenti
-python tools/simulate_machines.py --machines 10 --rate 5 --duration 120 --anomaly-prob 0.002
+# 10 machines, 5 samples/sec/sensor, 2 minutes, more frequent anomalies
+python simulator-local/simulate_machines.py --machines 10 --rate 5 --duration 120 --anomaly-prob 0.002
 ```
 
-Throughput totale = `machines × sensors_per_machine (8) × rate`.
+Total throughput = `machines × sensors_per_machine (8) × rate`.
 
-## Schema evento
+## Event schema
 
-Ogni evento è un singolo JSON UTF-8 conforme al contratto definito in
-[../docs/architecture.md](../docs/architecture.md) e alla mapping
-`raw_telemetry_json` in [../kql/01_tables.kql](../kql/01_tables.kql):
+Every event is a single UTF-8 JSON document matching the contract defined
+in [../docs/architecture.md](../docs/architecture.md) and the
+`raw_telemetry_json` mapping in [../kql/01_tables.kql](../kql/01_tables.kql):
 
 ```json
 {
@@ -63,26 +72,26 @@ Ogni evento è un singolo JSON UTF-8 conforme al contratto definito in
 }
 ```
 
-## Sensori simulati (per macchina)
+## Simulated sensors (per machine)
 
-| sensorId             | unità | baseline | note                          |
-|----------------------|-------|---------:|-------------------------------|
-| temperature_motor    | °C    |    60    | drift lento, oscillazione 5'  |
-| temperature_bearing  | °C    |    55    | drift lento                   |
-| vibration_axial      | g     |     0.20 | rumore alto                   |
-| vibration_radial     | g     |     0.30 | rumore alto                   |
-| current              | A     |    12    | oscillazione 30 s             |
-| spindle_rpm          | rpm   |  3000    |                               |
-| pressure_hydraulic   | bar   |   120    |                               |
-| power                | kW    |     8    | derivata                      |
+| sensorId             | unit  | baseline | notes                          |
+|----------------------|-------|---------:|--------------------------------|
+| temperature_motor    | °C    |    60    | slow drift, 5' oscillation     |
+| temperature_bearing  | °C    |    55    | slow drift                     |
+| vibration_axial      | g     |     0.20 | high noise                     |
+| vibration_radial     | g     |     0.30 | high noise                     |
+| current              | A     |    12    | 30 s oscillation               |
+| spindle_rpm          | rpm   |  3000    |                                |
+| pressure_hydraulic   | bar   |   120    |                                |
+| power                | kW    |     8    | derived                        |
 
-## Anomalie iniettate
+## Injected anomalies
 
-Con probabilità `--anomaly-prob` per sample/sensore, viene scelta a caso
-una di:
+With probability `--anomaly-prob` per sample/sensor, one of the following
+is picked at random:
 
-- **spike**: picco di ~15 σ per ~0.5 s, `quality = 0.6`
-- **drift**: deriva progressiva fino a ~25 σ in 8–20 s, `quality = 0.7`
-- **stuck**: valore congelato per 5–15 s, `quality = 0.4`
+- **spike**: ~15 σ peak for ~0.5 s, `quality = 0.6`
+- **drift**: progressive drift up to ~25 σ over 8–20 s, `quality = 0.7`
+- **stuck**: frozen value for 5–15 s, `quality = 0.4`
 
-Sono utili per validare il modello di anomaly detection lato KQL.
+Useful for validating the KQL-side anomaly-detection model.
