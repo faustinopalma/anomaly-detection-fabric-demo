@@ -1,0 +1,225 @@
+// 05_multivariate_mv.kql
+// Multivariate (per-machine) anomaly-detection pipeline, A2 design:
+//
+//   raw_telemetry ──(materialized view)──> raw_telemetry_wide_mv
+//                                             │
+//                                             ├─ wide row per (machine_id, ts_bin=1s)
+//                                             ├─ one column per sensor
+//                                             └─ Eventhouse reconciles bin rows automatically
+//                                                (no duplicates across batches, ~1x storage)
+//
+//   raw_telemetry ──(update policy with dedup filter)──> fn_score_multivariate_demo()
+//                                                            │
+//                                                            ├─ reads from MV (forward-filled)
+//                                                            ├─ scores last 64 bins
+//                                                            └─ writes anomalies into `anomalies`
+//                                                               (alongside the univariate model)
+//
+// The dedup filter is: scoring fires only for batches that contain at least
+// one row of the "anchor" sensor. With 8 sensors per machine this divides
+// the scoring rate by ~8 without losing any window.
+//
+// PREREQUISITES (already in 01_tables.kql / 03_scoring_functions.kql)
+//   - raw_telemetry table created with streaming ingestion DISABLED.
+//   - python() plugin enabled at Eventhouse + KQL Database level.
+//   - models table created.
+//   - latest_model() helper available.
+// ---------------------------------------------------------------------------
+
+// ===========================================================================
+// 1. Materialized view: wide pivoted table of all sensors per machine, 1s bin
+// ===========================================================================
+//
+// One row per (machine_id, ts_bin). Sensor columns hold the avg of the values
+// reported within the bin (typically a single value at our ingest rate).
+// Eventhouse reconciles partial rows from successive batches automatically.
+//
+// Backfill is enabled (default) so the MV picks up history already in
+// `raw_telemetry`, giving the training notebook immediate data to work with.
+.create-or-alter materialized-view raw_telemetry_wide_mv on table raw_telemetry
+{
+    raw_telemetry
+    | summarize
+        temperature_motor    = avgif(value, sensor_id == 'temperature_motor'),
+        temperature_bearing  = avgif(value, sensor_id == 'temperature_bearing'),
+        vibration_axial      = avgif(value, sensor_id == 'vibration_axial'),
+        vibration_radial     = avgif(value, sensor_id == 'vibration_radial'),
+        current              = avgif(value, sensor_id == 'current'),
+        power                = avgif(value, sensor_id == 'power'),
+        spindle_rpm          = avgif(value, sensor_id == 'spindle_rpm'),
+        pressure_hydraulic   = avgif(value, sensor_id == 'pressure_hydraulic')
+        by ts_bin = bin(ts, 1s), machine_id
+}
+
+// (MV retention inherits from the source table `raw_telemetry`: softdelete=30d.)
+
+// ===========================================================================
+// 2. Build function: read from MV, emit per-bin sensor bags
+// ===========================================================================
+//
+// Reads the MV for one machine, pulls (window_size - 1) bins of context for
+// straddling windows, and emits non-overlapping windows of `window_size`
+// bins. Each window's `values` is a list of `pack(...)` bags (NULLs preserved
+// for sensors missing in a bin); forward-fill happens in the python plugin
+// (pandas .ffill()) so the model never sees NaNs.
+.create-or-alter function with (folder='scoring',
+        docstring='Build multivariate windows for one machine from the wide MV. For update-policy use.')
+    build_multivariate_windows_batch_from_mv(
+        machine:string, window_size:int
+    ) {
+    let new_bins = raw_telemetry  // extent-filtered when called from update policy
+        | where machine_id == machine
+        | summarize by ts_bin = bin(ts, 1s), machine_id;
+    let new_ts_min = toscalar(new_bins | summarize min(ts_bin));
+    let new_data = database(current_database()).raw_telemetry_wide_mv
+        | where machine_id == machine and ts_bin >= new_ts_min
+        | project ts_bin, machine_id,
+            sensor_values = pack(
+                'temperature_motor',   temperature_motor,
+                'temperature_bearing', temperature_bearing,
+                'vibration_axial',     vibration_axial,
+                'vibration_radial',    vibration_radial,
+                'current',             current,
+                'power',               power,
+                'spindle_rpm',         spindle_rpm,
+                'pressure_hydraulic',  pressure_hydraulic
+            );
+    let context = database(current_database()).raw_telemetry_wide_mv
+        | where machine_id == machine and ts_bin < new_ts_min
+        | top (window_size - 1) by ts_bin desc
+        | project ts_bin, machine_id,
+            sensor_values = pack(
+                'temperature_motor',   temperature_motor,
+                'temperature_bearing', temperature_bearing,
+                'vibration_axial',     vibration_axial,
+                'vibration_radial',    vibration_radial,
+                'current',             current,
+                'power',               power,
+                'spindle_rpm',         spindle_rpm,
+                'pressure_hydraulic',  pressure_hydraulic
+            );
+    union context, new_data
+    | order by ts_bin asc
+    | extend rn = row_number() - 1
+    | extend win_id = rn / window_size
+    | summarize
+        window_start = min(ts_bin),
+        window_end   = max(ts_bin),
+        values       = make_list(sensor_values)
+        by machine_id, win_id
+    | where array_length(values) == window_size
+    | where window_end >= new_ts_min
+    | project-away win_id
+}
+
+// ===========================================================================
+// 3. Score function: invoke ONNX in the python sandbox
+// ===========================================================================
+//
+// Reads the (machine,) windows from build_multivariate_windows_batch_from_mv,
+// passes the (window_size, n_features) array to the ONNX model, returns
+// one score per window. The threshold is read from the model metadata
+// (set during training as mean(loss) + 3*std(loss) on the training set).
+.create-or-alter function with (folder='scoring',
+        docstring='Score the new-batch multivariate windows of one machine using the latest ONNX model from the wide MV.')
+    score_multivariate_onnx_batch_from_mv(
+        model_name:string, machine:string
+    ) {
+    let m         = latest_model(model_name);
+    let model_b64 = toscalar(m | project payload);
+    let model_ver = toint(toscalar(m | project version));
+    let win_size  = toint(toscalar(m | project window_size));
+    let threshold = todouble(toscalar(m | project todouble(metadata.threshold)));
+    build_multivariate_windows_batch_from_mv(machine, win_size)
+    | extend model_b64 = model_b64
+    | evaluate python(
+        typeof(*, score:real),
+```
+import base64, numpy as np, pandas as pd, onnxruntime as ort
+SENSORS = ['temperature_motor','temperature_bearing','vibration_axial','vibration_radial','current','power','spindle_rpm','pressure_hydraulic']
+if len(df) == 0:
+    result = df.copy()
+    result['score'] = np.array([], dtype=float)
+else:
+    b64 = df['model_b64'].iloc[0]
+    sess = ort.InferenceSession(base64.b64decode(b64))
+    input_name = sess.get_inputs()[0].name
+    # Each row's `values` is a list of per-bin dicts. Forward-fill NaNs per
+    # window using a small DataFrame, then stack into (window_size, n_features).
+    batch = []
+    for win in df['values']:
+        wdf = pd.DataFrame([[step.get(s) for s in SENSORS] for step in win], columns=SENSORS)
+        wdf = wdf.ffill().bfill().fillna(0.0)
+        batch.append(wdf.to_numpy(dtype=np.float32))
+    X = np.stack(batch)  # (batch, window_size, n_features)
+    out = sess.run(None, {input_name: X})[0].reshape(-1)
+    result = df.copy()
+    result['score'] = out
+```
+    )
+    | project-away model_b64
+    | extend
+        model_name    = model_name,
+        model_version = model_ver,
+        is_anomaly    = score > threshold,
+        detected_at   = now()
+}
+
+// ===========================================================================
+// 4. Update-policy entry point with dedup filter
+// ===========================================================================
+//
+// Wired into the `anomalies` table as a SECOND update policy (alongside
+// the univariate one). The dedup filter (`temperature_motor` as anchor
+// sensor) makes this fire ~1x per ingest batch instead of N=8x.
+.create-or-alter function with (folder='scoring',
+        docstring='Multivariate scoring entry point for M-001. Dedup-filtered for update policy use.')
+    fn_score_multivariate_demo() {
+    // Dedup: only run when the new batch contains at least one row of the
+    // anchor sensor for the target machine. Saves ~7/8 of unnecessary calls.
+    let n_anchor = toscalar(
+        raw_telemetry
+        | where machine_id == 'M-001' and sensor_id == 'temperature_motor'
+        | summarize count()
+    );
+    score_multivariate_onnx_batch_from_mv(
+        model_name = 'multivariate_ae__M-001',
+        machine    = 'M-001'
+    )
+    | where n_anchor > 0
+    | where is_anomaly
+    | project
+        detected_at, machine_id,
+        sensor_id    = '',                       // multivariate -> no single sensor
+        window_start, window_end,
+        model_name, model_version,
+        score, is_anomaly,
+        payload = bag_pack('values', values)
+}
+
+// ===========================================================================
+// 5. Attach as a SECOND update policy on `anomalies`
+// ===========================================================================
+//
+// Both policies coexist: the existing univariate fn_score_demo() and the
+// new fn_score_multivariate_demo() both write into `anomalies`, distinguished
+// by `model_name` (univariate_ae__* vs multivariate_ae__*).
+.alter table anomalies policy update
+```
+[
+  {
+    "IsEnabled": true,
+    "Source": "raw_telemetry",
+    "Query": "fn_score_demo()",
+    "IsTransactional": false,
+    "PropagateIngestionProperties": false
+  },
+  {
+    "IsEnabled": true,
+    "Source": "raw_telemetry",
+    "Query": "fn_score_multivariate_demo()",
+    "IsTransactional": false,
+    "PropagateIngestionProperties": false
+  }
+]
+```
