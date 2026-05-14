@@ -17,8 +17,8 @@ Read in this order, depending on what you want:
 |---|---|
 | [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. **Start here.** |
 | [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
-| [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
-| [`data_modeling_industrial_measures.md`](data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
+| [`docs/anomaly_detection_fabric_kql.md`](docs/anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
+| [`docs/data_modeling_industrial_measures.md`](docs/data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
 | [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream and run KQL scripts. |
 
 ## Prerequisites
@@ -55,11 +55,11 @@ silent until it expires.
 .
 ├── .env.example                          # template; copy to .env (gitignored)
 ├── README.md
-├── anomaly_detection_fabric_kql.md       # KQL cookbook (every option, with code)
-├── data_modeling_industrial_measures.md  # long vs wide vs hybrid table designs
 ├── docs/
-│   ├── concepts.md                       # plain-English tour — start here
-│   └── architecture.md                   # deployed items + post-deploy steps
+│   ├── concepts.md                              # plain-English tour — start here
+│   ├── architecture.md                          # deployed items + post-deploy steps
+│   ├── anomaly_detection_fabric_kql.md          # KQL cookbook (every option, with code)
+│   └── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
 ├── kql/
 │   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy
 │   ├── 02_models.kql                     # versioned ONNX model registry

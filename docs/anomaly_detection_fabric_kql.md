@@ -1,8 +1,8 @@
 # Anomaly Detection in Fabric Eventhouse — Complete KQL guide
 
-> Companion documents: [`docs/concepts.md`](docs/concepts.md) for the
+> Companion documents: [`concepts.md`](concepts.md) for the
 > design rationale of the demo built on top of these patterns, and
-> [`docs/architecture.md`](docs/architecture.md) for the deployed items.
+> [`architecture.md`](architecture.md) for the deployed items.
 
 This guide covers every available path for doing anomaly detection **inside Fabric Eventhouse**, with near real-time scoring, leveraging:
 

@@ -6,9 +6,9 @@ the way it does.
 
 For the executable details, see:
 
-- [`anomaly_detection_fabric_kql.md`](../anomaly_detection_fabric_kql.md) —
+- [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md) —
   the cookbook (full code, every option).
-- [`data_modeling_industrial_measures.md`](../data_modeling_industrial_measures.md) —
+- [`data_modeling_industrial_measures.md`](data_modeling_industrial_measures.md) —
   how to shape the tables when measurements come in heterogeneously.
 - [`architecture.md`](architecture.md) — the deployed pieces of this demo.
 

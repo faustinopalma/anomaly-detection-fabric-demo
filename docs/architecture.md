@@ -112,7 +112,7 @@ Two ways to apply them:
 
 > **Prerequisite**: the `python()` plugin must be enabled both at the
 > Eventhouse level **and** on each KQL Database. See
-> [`../anomaly_detection_fabric_kql.md`](../anomaly_detection_fabric_kql.md)
+> [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md)
 > §2.1.
 
 ### 4.3 Training and scoring loop

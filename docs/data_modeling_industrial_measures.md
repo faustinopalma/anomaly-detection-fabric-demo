@@ -1,6 +1,6 @@
 # Data modeling for industrial measurements in Fabric Eventhouse
 
-> Companion documents: [`docs/concepts.md`](docs/concepts.md) (architecture
+> Companion documents: [`concepts.md`](concepts.md) (architecture
 > overview) and [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md)
 > (KQL cookbook).
 
