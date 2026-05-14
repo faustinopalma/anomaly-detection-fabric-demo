@@ -9,8 +9,17 @@ multiple sensors), trains a window-based model offline, exports it to
 **ONNX**, and scores it **inside the Fabric KQL database** via the
 `python()` plugin — no external Spark/AKS cluster required.
 
-> See [`docs/architecture.md`](docs/architecture.md) for the full design
-> (data flow, KQL schema, training loop, constraints).
+## Documentation
+
+Read in this order, depending on what you want:
+
+| Doc | What you get |
+|---|---|
+| [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. **Start here.** |
+| [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
+| [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
+| [`data_modeling_industrial_measures.md`](data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
+| [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream and run KQL scripts. |
 
 ## Prerequisites
 
@@ -44,25 +53,31 @@ silent until it expires.
 
 ```
 .
-├── .env.example                  # template; copy to .env (gitignored)
-├── .gitignore
+├── .env.example                          # template; copy to .env (gitignored)
 ├── README.md
+├── anomaly_detection_fabric_kql.md       # KQL cookbook (every option, with code)
+├── data_modeling_industrial_measures.md  # long vs wide vs hybrid table designs
 ├── docs/
-│   └── architecture.md           # full design + diagrams
+│   ├── concepts.md                       # plain-English tour — start here
+│   └── architecture.md                   # deployed items + post-deploy steps
 ├── kql/
-│   ├── 01_tables.kql             # raw_telemetry, anomalies
-│   ├── 02_models.kql             # versioned ONNX model registry
-│   ├── 03_scoring_functions.kql  # window builders + python(onnx) scorers
-│   └── 04_update_policy.kql      # auto-score on ingest
+│   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy
+│   ├── 02_models.kql                     # versioned ONNX model registry
+│   ├── 03_scoring_functions.kql          # window builders + python(onnx) scorers
+│   └── 04_update_policy.kql              # auto-score on ingest
 ├── items/
-│   ├── nb-prepare-features.Notebook/
-│   ├── nb-train-export-onnx.Notebook/
-│   └── nb-register-kql-scorer.Notebook/
+│   ├── nb_prepare_features.Notebook/
+│   ├── nb_train_export_onnx.Notebook/
+│   └── nb_register_kql_scorer.Notebook/
+├── notebooks/                            # ad-hoc / exploration notebooks
+├── tools/                                # Python helpers (Eventstream wiring, KQL setup, anomaly inject)
+├── simulator-local/                      # run the simulator locally
+├── simulator-cloud/                      # always-on simulator on Azure Container Apps
 └── scripts/
-    ├── deploy.ps1                # main entrypoint
+    ├── deploy.ps1                        # main entrypoint
     └── lib/
-        ├── env.ps1               # .env loader + validation
-        └── fabric.ps1            # thin idempotent helpers around `fab`
+        ├── env.ps1                      # .env loader + validation
+        └── fabric.ps1                   # thin idempotent helpers around `fab`
 ```
 
 ## What the script creates
@@ -74,18 +89,22 @@ post-deploy — see [`docs/architecture.md`](docs/architecture.md).
 | Item             | Name (default)            | Type           |
 |------------------|---------------------------|----------------|
 | Workspace        | `anomaly-detection-dev`   | Workspace      |
-| Eventstream      | `es-machines`             | Eventstream    |
-| Eventhouse       | `eh-telemetry`            | Eventhouse     |
-| KQL Database     | `kql-telemetry`           | KQLDatabase    |
-| Lakehouse        | `lh-telemetry`            | Lakehouse      |
-| Environment      | `env-anomaly`             | Environment    |
-| Notebook         | `nb-prepare-features`     | Notebook       |
-| Notebook         | `nb-train-export-onnx`    | Notebook       |
-| Notebook         | `nb-register-kql-scorer`  | Notebook       |
-| Data Pipeline    | `pl-retrain`              | DataPipeline   |
-| Reflex           | `act-anomaly-alerts`      | Reflex         |
-| Semantic Model   | `sm-anomaly`              | SemanticModel  |
-| Report           | `rpt-anomaly`             | Report         |
+| Eventstream      | `es_machines`             | Eventstream    |
+| Eventhouse       | `eh_telemetry`            | Eventhouse     |
+| KQL Database     | `kql_telemetry`           | KQLDatabase    |
+| Lakehouse        | `lh_telemetry`            | Lakehouse      |
+| Environment      | `env_anomaly`             | Environment    |
+| Notebook         | `nb_prepare_features`     | Notebook       |
+| Notebook         | `nb_train_export_onnx`    | Notebook       |
+| Notebook         | `nb_register_kql_scorer`  | Notebook       |
+| Data Pipeline    | `pl_retrain`              | DataPipeline   |
+| Reflex           | `act_anomaly_alerts`      | Reflex         |
+| Semantic Model   | `sm_anomaly`              | SemanticModel  |
+| Report           | `rpt_anomaly`             | Report         |
+
+Item names use underscores throughout because some Fabric item types
+(Eventstream, Reflex, …) reject hyphens. Defaults can be overridden in
+`.env`.
 
 The script is **idempotent**: re-running skips items that already exist.
 

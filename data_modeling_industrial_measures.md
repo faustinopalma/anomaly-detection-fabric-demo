@@ -1,5 +1,9 @@
 # Data modeling for industrial measurements in Fabric Eventhouse
 
+> Companion documents: [`docs/concepts.md`](docs/concepts.md) (architecture
+> overview) and [`anomaly_detection_fabric_kql.md`](anomaly_detection_fabric_kql.md)
+> (KQL cookbook).
+
 ## Long, Wide, or Hybrid — which to choose and why
 
 This document compares the three main data-modeling strategies for process measurements coming from industrial machines, with a focus on usage in Fabric Eventhouse for anomaly detection, dashboards, and historical analysis. The choice is not purely aesthetic: it has measurable impact on query performance, ML pipeline complexity, maintenance cost, and the ability to evolve the schema over time.

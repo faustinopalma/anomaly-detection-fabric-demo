@@ -1,5 +1,9 @@
 # Architecture — Factory Anomaly Detection on Microsoft Fabric
 
+> For the *why* behind these choices (in plain English, no code), read
+> [`concepts.md`](concepts.md) first. This document focuses on the *what*:
+> the items deployed by `scripts/deploy.ps1` and how they are wired up.
+
 ## 1. Goal
 
 Detect anomalies in real time across **multiple factory machines**, each
@@ -15,11 +19,11 @@ current, …). The detection model:
 ## 2. High-level flow
 
 ```
-[machines × sensors] ──AMQP/Kafka──► Eventstream  (es-machines)
+[machines × sensors] ──AMQP/Kafka──► Eventstream  (es_machines)
                                           │
                 ┌─────────────────────────┼─────────────────────────┐
                 ▼                                                   ▼
-  Eventhouse / KQL Database (eh-telemetry / kql-telemetry)    Lakehouse (lh-telemetry)
+  Eventhouse / KQL Database (eh_telemetry / kql_telemetry)    Lakehouse (lh_telemetry)
    ├─ raw_telemetry        (hot store, 30d retention)          ├─ Tables/bronze_telemetry
    ├─ models               (versioned ONNX bytes)              ├─ Tables/silver_telemetry
    ├─ scoring functions    (build window → python(onnx))       ├─ Tables/gold_windows_uni
@@ -27,14 +31,14 @@ current, …). The detection model:
    └─ anomalies            (detections; 365d retention)                 ▲
                 ▲                                                       │
                 │                                                       │
-   Reflex (act-anomaly-alerts)                            Notebook nb-prepare-features
-        Teams / email / pipeline trigger                  Notebook nb-train-export-onnx ──► uploads .onnx into models table
-                                                          Notebook nb-register-kql-scorer ──► (re-)applies KQL functions
+   Reflex (act_anomaly_alerts)                            Notebook nb_prepare_features
+        Teams / email / pipeline trigger                  Notebook nb_train_export_onnx ──► uploads .onnx into models table
+                                                          Notebook nb_register_kql_scorer ──► (re-)applies KQL functions
                                                                   ▲
                                                                   │
-                                                Data Pipeline (pl-retrain) — schedule
+                                                Data Pipeline (pl_retrain) — schedule
 
-Semantic Model (sm-anomaly) ◄── KQL DB + Lakehouse gold ──► Report (rpt-anomaly)
+Semantic Model (sm_anomaly) ◄── KQL DB + Lakehouse gold ──► Report (rpt_anomaly)
 ```
 
 ## 3. Items provisioned by `scripts/deploy.ps1`
@@ -42,22 +46,25 @@ Semantic Model (sm-anomaly) ◄── KQL DB + Lakehouse gold ──► Report (
 | Item             | Name (default)         | Type           | Purpose                                                      |
 |------------------|------------------------|----------------|--------------------------------------------------------------|
 | Workspace        | `anomaly-detection-dev`| Workspace      | Container; bound to the configured capacity                  |
-| Eventstream      | `es-machines`          | Eventstream    | Single ingestion endpoint for all machines (custom-app source); fan-out to KQL + Lakehouse |
-| Eventhouse       | `eh-telemetry`         | Eventhouse     | Hosts the KQL database                                       |
-| KQL Database     | `kql-telemetry`        | KQLDatabase    | Hot store + ONNX scoring + anomaly table                     |
-| Lakehouse        | `lh-telemetry`         | Lakehouse      | Cold store + medallion tables for training                   |
-| Environment      | `env-anomaly`          | Environment    | Pinned PySpark libs (torch, onnx, onnxruntime, scikit-learn, skl2onnx, azure-kusto-data) |
-| Notebook         | `nb-prepare-features`  | Notebook       | bronze → silver → gold (univariate + multivariate windows)   |
-| Notebook         | `nb-train-export-onnx` | Notebook       | Trains a model, exports ONNX, uploads bytes to KQL `models`  |
-| Notebook         | `nb-register-kql-scorer`| Notebook      | Reapplies `kql/*.kql` to the database                        |
-| Data Pipeline    | `pl-retrain`           | DataPipeline   | Schedules the three notebooks                                |
-| Reflex           | `act-anomaly-alerts`   | Reflex         | Reacts on rows landing in the `anomalies` table              |
-| Semantic Model   | `sm-anomaly`           | SemanticModel  | Direct Lake model over gold + anomalies                      |
-| Report           | `rpt-anomaly`          | Report         | Operational dashboard                                        |
+| Eventstream      | `es_machines`          | Eventstream    | Single ingestion endpoint for all machines (custom-app source); fan-out to KQL + Lakehouse |
+| Eventhouse       | `eh_telemetry`         | Eventhouse     | Hosts the KQL database                                       |
+| KQL Database     | `kql_telemetry`        | KQLDatabase    | Hot store + ONNX scoring + anomaly table                     |
+| Lakehouse        | `lh_telemetry`         | Lakehouse      | Cold store + medallion tables for training                   |
+| Environment      | `env_anomaly`          | Environment    | Pinned PySpark libs (torch, onnx, onnxruntime, scikit-learn, skl2onnx, azure-kusto-data) |
+| Notebook         | `nb_prepare_features`  | Notebook       | bronze → silver → gold (univariate + multivariate windows)   |
+| Notebook         | `nb_train_export_onnx` | Notebook       | Trains a model, exports ONNX, uploads bytes to KQL `models`  |
+| Notebook         | `nb_register_kql_scorer`| Notebook      | Reapplies `kql/*.kql` to the database                        |
+| Data Pipeline    | `pl_retrain`           | DataPipeline   | Schedules the three notebooks                                |
+| Reflex           | `act_anomaly_alerts`   | Reflex         | Reacts on rows landing in the `anomalies` table              |
+| Semantic Model   | `sm_anomaly`           | SemanticModel  | Direct Lake model over gold + anomalies                      |
+| Report           | `rpt_anomaly`          | Report         | Operational dashboard                                        |
 
 All items are created **blank** (notebooks ship with starter scaffolds in
 `items/<name>.Notebook/`). Schema, scoring logic, Eventstream wiring and
-Reflex rules are configured separately — see §4.
+Reflex rules are configured separately — see §4. Item names use
+underscores because some Fabric item types (Eventstream, Reflex, …)
+reject hyphens; the defaults are defined in `.env.example` and can be
+overridden in `.env`.
 
 ## 4. Post-deploy configuration
 
@@ -66,19 +73,19 @@ applied next:
 
 ### 4.1 Eventstream wiring (portal, one-off)
 
-1. Open `es-machines` → **Add source** → **Custom App**. Note the AMQP /
+1. Open `es_machines` → **Add source** → **Custom App**. Note the AMQP /
    Kafka connection string; share it with the device fleet.
-2. **Add destination** → **Eventhouse** → select `kql-telemetry`, target
+2. **Add destination** → **Eventhouse** → select `kql_telemetry`, target
    table `raw_telemetry`, mapping `raw_telemetry_json` (created in §4.2).
-3. **Add destination** → **Lakehouse** → `lh-telemetry`, table
+3. **Add destination** → **Lakehouse** → `lh_telemetry`, table
    `bronze_telemetry`, Delta format.
 
 Telemetry payload contract (JSON):
 
 ```json
 {
-  "machineId": "M001",
-  "sensorId":  "temp",
+  "machineId": "M-001",
+  "sensorId":  "temperature_motor",
   "ts":        "2026-05-07T10:15:23.451Z",
   "value":     72.3,
   "quality":   192
@@ -87,57 +94,78 @@ Telemetry payload contract (JSON):
 
 ### 4.2 KQL schema
 
-Run the scripts in `kql/` against `kql-telemetry`, in order:
+Run the scripts in `kql/` against `kql_telemetry`, in order:
 
 | File                          | Creates                                           |
 |-------------------------------|---------------------------------------------------|
-| `01_tables.kql`               | `raw_telemetry`, `anomalies`, JSON mapping        |
+| `01_tables.kql`               | `raw_telemetry`, `anomalies`, JSON mapping, batching policy |
 | `02_models.kql`               | `models` table + `latest_model()` helper          |
-| `03_scoring_functions.kql`    | `build_*_windows`, `score_*_onnx` (calls `python()`) |
+| `03_scoring_functions.kql`    | `score_univariate_onnx_batch` (update-policy safe) and `score_univariate_onnx_lookback` (ad-hoc) |
 | `04_update_policy.kql`        | `fn_score_demo` + update policy on `raw_telemetry`|
 
 Two ways to apply them:
 
 - **Portal**: open the KQL queryset attached to the database, paste each file, run.
-- **Notebook**: run `nb-register-kql-scorer` (uploads `kql/` to the lakehouse Files area first).
+- **Script**: run `python tools/02_setup_kql_tables.py kql/*.kql` (auth via
+  the same `.env` used for `scripts/deploy.ps1`).
+- **Notebook**: run `nb_register_kql_scorer` (uploads `kql/` to the lakehouse Files area first).
 
-> **Prerequisite**: the `python()` plugin must be enabled on the Eventhouse.
-> If it isn't, the scoring functions will compile but fail at execution.
+> **Prerequisite**: the `python()` plugin must be enabled both at the
+> Eventhouse level **and** on each KQL Database. See
+> [`../anomaly_detection_fabric_kql.md`](../anomaly_detection_fabric_kql.md)
+> §2.1.
 
 ### 4.3 Training and scoring loop
 
-1. `nb-prepare-features` builds `gold_windows_uni` and `gold_windows_multi`.
-2. `nb-train-export-onnx` trains a model, exports ONNX, ingests
-   `(name, version, payload, …)` into the `models` table.
+1. `nb_prepare_features` builds `gold_windows_uni` and `gold_windows_multi`.
+2. `nb_train_export_onnx` trains a model, exports ONNX, ingests
+   `(name, version, payload, …)` into the `models` table. Model names follow
+   the convention `univariate_ae__<sensor_id>` (e.g.
+   `univariate_ae__temperature_motor`).
 3. The KQL update policy automatically picks up the latest version on the
-   next ingest batch; or you can call the scoring function ad-hoc:
+   next ingest batch via `score_univariate_onnx_batch` (see
+   [`concepts.md` §9](concepts.md#9-window-based-models-need-a-small-slice-of-history-across-batch-boundaries)
+   for why this function is the one safe to call from an update policy).
+   For ad-hoc exploration from a notebook or queryset use the lookback
+   variant:
 
    ```kusto
-   score_univariate_onnx('univariate_ae', 'M001', 'temp', 64, 10m, 0.85)
+   score_univariate_onnx_lookback('univariate_ae__temperature_motor',
+                                  'M-001', 'temperature_motor', 64, 10m, 3870.0)
    | where is_anomaly
    ```
 
-4. `pl-retrain` schedules the three notebooks (e.g. nightly).
+4. `pl_retrain` schedules the three notebooks (e.g. nightly).
 
 ### 4.4 Alerting
 
-In Reflex (`act-anomaly-alerts`) connect to the `anomalies` KQL stream and
+In Reflex (`act_anomaly_alerts`) connect to the `anomalies` KQL stream and
 add a rule — e.g. "send Teams message when a row lands with
-`is_anomaly == true` and `score > 0.95`".
+`is_anomaly == true` and `score > 4000`".
+
+### 4.5 Validating end-to-end without the simulator
+
+`tools/inject_anomaly.py` appends N contiguous spike samples directly
+into `raw_telemetry` for one (machine, sensor). The new extent triggers
+the update policy and an anomaly should land in `anomalies` within
+~60–90 s. Useful as a smoke test after redeploying the KQL functions or
+the model.
 
 ## 5. Constraints and trade-offs
+
+For the design rationale see [`concepts.md` §6–10](concepts.md). The
+operational constraints to keep in mind:
 
 - **`python()` sandbox**: ~1 GB model size, no internet, packages limited
   to numpy/pandas/scipy/scikit-learn/onnxruntime/statsmodels and a few
   others. ONNX inference fits comfortably; full DL training does not.
-- **Window scoring frequency**: update policies run synchronously per
-  ingest batch — keep the scoring function fast (<~1–2 s). For wider
-  windows or many machines per batch, prefer scheduled scoring (call the
-  scoring function from a KQL queryset every N seconds, or from a
-  pipeline).
+- **Update-policy scoring is per-batch**: cost is proportional to the new
+  batch plus a tiny `(window_size - 1)` left-context read per (machine,
+  sensor). Pin the `ingestionbatching` policy so batches are large enough
+  to contain full windows (see `kql/01_tables.kql`).
 - **Multivariate alignment**: multivariate windows require sensors to be
   resampled onto a common time bin (`build_multivariate_windows` does this
-  in KQL; `nb-prepare-features` does the equivalent in Spark for training).
+  in KQL; `nb_prepare_features` does the equivalent in Spark for training).
 - **Model versioning**: scoring uses `latest_model()` by default. Pin a
   version by changing `score_*_onnx` to take a `version:int` parameter
   if you need staged rollouts.
