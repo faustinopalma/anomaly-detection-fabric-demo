@@ -1,16 +1,20 @@
 // 04_update_policy.kql
-// Define the on-demand scoring entry point for a fixed (machine, sensor).
-// This function can be invoked from:
-//   * Activator (Reflex) on a poll trigger
-//   * A scheduled Fabric Data Pipeline that runs `.set-or-append anomalies <| fn_score_demo()`
-//   * Ad-hoc KQL queries for debugging
+// Define the on-demand scoring function and attach it as an update policy
+// on the `anomalies` table so that every batch ingested into `raw_telemetry`
+// is automatically scored and anomalous windows are persisted.
 //
-// PLATFORM CONSTRAINT
-//   The `python()` plugin cannot be used inside an update policy when the
-//   source table is fed by streaming ingestion (Eventstream default).
-//   See `anomaly_detection_fabric_kql.md` §2.3. Hence the `.alter table
-//   anomalies policy update` command is intentionally NOT applied here:
-//   scoring is driven from outside (Activator poll or scheduled job).
+// PREREQUISITE
+//   The source table (`raw_telemetry`) MUST be on queued ingestion, NOT
+//   streaming. The python() plugin is not allowed in update policies whose
+//   source table uses streaming ingestion.
+//   In Fabric Eventhouse streaming ingestion is enabled by default for all
+//   tables, so you must explicitly disable it once on `raw_telemetry`:
+//
+//     .alter table raw_telemetry policy streamingingestion '{"IsEnabled": false}'
+//
+//   Eventstream then delivers in queued mode (latency ~5-30s, fine for
+//   anomaly detection). See anomaly_detection_fabric_kql.md §2.3 for the
+//   full reasoning and the official Microsoft docs links.
 //
 // IMPORTANT
 //   * `machine` / `sensor` / threshold values below are demo defaults.
@@ -18,7 +22,7 @@
 //     or pre-create a (machine, sensor, model) routing table.
 
 .create-or-alter function with (folder='scoring',
-        docstring='On-demand scoring entry point: score the last window for a fixed (machine, sensor)')
+        docstring='Scoring entry point: score recent windows for a fixed (machine, sensor)')
     fn_score_demo() {
     score_univariate_onnx(
         model_name = 'univariate_ae__temperature_motor',
@@ -26,7 +30,7 @@
         sensor     = 'temperature_motor',
         window_size= 64,
         lookback   = 10m,
-        threshold  = 3870.0  // demo: ~p95 of recent reconstruction errors (see tools/_calibrate.py)
+        threshold  = 3870.0  // ~p95 of recent reconstruction errors (calibrate per machine)
     )
     | where is_anomaly
     | project
@@ -37,10 +41,21 @@
         payload = bag_pack('values', values)
 }
 
-// To materialize hits into the `anomalies` table on a schedule (every N
-// minutes), wire a Fabric Data Pipeline notebook activity that runs:
-//
-//   .set-or-append anomalies <| fn_score_demo()
-//
-// Or have Activator poll `fn_score_demo()` directly and trigger the alert
-// channels (Teams / email / webhook) without persisting first.
+// Attach the function to `anomalies` as an update policy. Every batch
+// ingested into `raw_telemetry` triggers `fn_score_demo()`; only rows where
+// `is_anomaly` is true land in `anomalies`.
+//   * IsTransactional=false -> if scoring fails, raw rows are still kept.
+//   * PropagateIngestionProperties=false -> we don't need extent tags.
+
+.alter table anomalies policy update
+```
+[
+  {
+    "IsEnabled": true,
+    "Source": "raw_telemetry",
+    "Query": "fn_score_demo()",
+    "IsTransactional": false,
+    "PropagateIngestionProperties": false
+  }
+]
+```

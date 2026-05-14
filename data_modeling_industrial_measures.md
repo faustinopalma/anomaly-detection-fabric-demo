@@ -234,6 +234,29 @@ The idea is not to choose between A and B, but to **build both layers** so each 
 - **Multiplied storage**: same data in multiple shapes. In Eventhouse the cost is contained thanks to compression, but it is not zero. Compensate with aggressive retention policies on the derived layers (e.g. 7 days hot, keeping history only in raw).
 - **Discipline required on `machines_dim`**: if the master data is not up-to-date, enrichment leaves rows with `machine_type` null and the entire downstream chain drops them. It must be monitored.
 
+### Two operational gotchas with Python-based update policies
+
+These bite anyone who builds the scoring layer for the first time. They are unrelated to data modelling per se, but they break the whole pipeline if missed:
+
+1. **Source table must use queued (not streaming) ingestion.** The `python()` plugin is not allowed in update policies whose source table has streaming ingestion enabled. In **Microsoft Fabric Eventhouse, streaming is the default** for every newly created table, so a fresh Eventstream-backed table will silently fail to score. Disable it once on the source:
+
+   ```kusto
+   .alter table measures_raw policy streamingingestion '{"IsEnabled": false}'
+   ```
+
+   Latency moves from <1 s to 5-30 s — fine for any anomaly-detection scenario.
+
+2. **Per-extent rewrite of direct table references inside the function.** The engine rewrites `measures_raw` (or any direct ref to the source table) inside the update-policy query as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. For window-based scoring (e.g. an autoencoder over 64 samples per `(machine, sensor)`) a single extent rarely contains enough contiguous data to build a complete window, so the function emits zero rows. Bypass the rewrite by referencing the table **indirectly via `database()`** so you can read the last N minutes:
+
+   ```kusto
+   database(current_database()).measures_raw
+   | where machine_id == ... and sensor_id == ...
+   | where ts > now() - 10m
+   | ...
+   ```
+
+   This re-reads the lookback window on every batch and therefore can re-emit duplicate anomalies; dedupe at query time or persist a "already-emitted" tag.
+
 ### When it makes sense
 
 - Source schema sub-optimal and not immediately changeable

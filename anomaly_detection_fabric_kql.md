@@ -87,10 +87,22 @@ Available images today:
 
 The Python plugin **does not work inside update policies fed by streaming ingestion**. It only works with:
 
-- Queued (batch) ingestion — the default for Eventstream
+- **Queued (batch) ingestion** on the source table
 - `.set-or-append` from a query
 
-If the Eventstream is configured in pure streaming mode, scoring must be done in an **intermediate table** fed in batch. For most industrial cases (samples every N seconds/minutes) queued ingestion is more than enough, with typical latencies of 5-30 seconds.
+> **Heads-up — in Microsoft Fabric Eventhouse, streaming ingestion is _enabled by default_ on every newly created table.** This means an Eventstream attached to a fresh table will use streaming, and any update policy that calls `python()` on that table will silently fail to fire (or be rejected at attach time).
+>
+> You must explicitly **disable streaming ingestion on the source table** before attaching a Python-based update policy. One-shot KQL command:
+>
+> ```kql
+> .alter table raw_telemetry policy streamingingestion '{"IsEnabled": false}'
+> ```
+>
+> After this, Eventstream delivers data via queued ingestion (typical latency 5-30 s — perfectly fine for industrial anomaly detection). Sources:
+> - <https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric#use-ingestion-from-query-and-update-policy>
+> - <https://learn.microsoft.com/azure/data-explorer/ingest-data-streaming#limitations>
+
+For pure-streaming use cases (sub-second latency required), scoring must be done in a **two-stage pipeline**: streaming table → batch follower table (with the update policy + Python).
 
 ---
 
@@ -375,6 +387,25 @@ result["detected_at"] = datetime.utcnow()
 ```
 
 Every new record entering `measures_raw` is scored; only anomalous rows land in `anomalies`. Typical latency is a few seconds from ingestion.
+
+> **Two gotchas to remember when wiring this up:**
+>
+> 1. **Disable streaming on the source table first** — see §2.3. Without it the plugin invocation fails silently.
+> 2. **Per-extent rewrite of the source table.** When invoked from an update policy the engine rewrites every direct reference to the source table as `__table("measures_raw") | where extent_id() in (guid(<just-ingested-extent>))`. That means the function only sees the rows of the new extent — typically a tiny slice (seconds to a couple of minutes). For point-wise scoring (one row in, one score out) that's fine. For **window-based scoring** (e.g. 64-sample autoencoder windows) a single extent rarely contains enough contiguous samples per `(machine, sensor)` to build any complete window, so nothing comes out and the `anomalies` table stays empty.
+>
+>     Workaround: inside the scoring function, reference the source table **indirectly via `database()`** so the engine does NOT apply the extent filter and you can read the last N minutes:
+>
+>     ```kusto
+>     // INSIDE the function called by the update policy
+>     database(current_database()).measures_raw
+>     | where ts > now() - 10m
+>     | ...
+>     ```
+>
+>     The trade-off is that every batch re-reads the full lookback and re-emits the same windows → you'll get **duplicate anomaly rows**. Mitigations:
+>     - Dedupe at query time (`anomalies | summarize arg_max(detected_at, *) by window_start, machine_id, sensor_id`).
+>     - Or persist a `(window_start, machine_id, sensor_id)` "already-emitted" tag and filter inside the function.
+>     - Or make the function emit only windows whose `window_end` is within the new batch's timestamp range.
 
 ### 4.3 Pattern: time-series feature engineering
 
