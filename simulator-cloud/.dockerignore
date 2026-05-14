@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+.git/
+README.md
+deploy.ps1
+teardown.ps1
