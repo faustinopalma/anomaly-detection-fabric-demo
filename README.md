@@ -15,6 +15,7 @@ Read in this order, depending on what you want:
 
 | Doc | What you get |
 |---|---|
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | **Fresh-machine recipe**: clone → working environment in ~12 sequential steps. Use this when bringing up a new PC or Remote Tunnel. |
 | [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. **Start here.** |
 | [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
 | [`docs/anomaly_detection_fabric_kql.md`](docs/anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
@@ -32,6 +33,11 @@ Read in this order, depending on what you want:
   Eventhouse (admin toggle)
 
 ## Setup
+
+> For a complete fresh-machine recipe (clone → live ingestion in ~12
+> sequential steps) see [`docs/RUNBOOK.md`](docs/RUNBOOK.md). The
+> abridged version below covers only the happy path on a machine that
+> already has Python, PowerShell and Azure CLI.
 
 ```powershell
 # 1. Install the Fabric CLI (once)
