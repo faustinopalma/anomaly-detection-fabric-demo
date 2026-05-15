@@ -48,7 +48,6 @@ from typing import Iterable
 from azure.eventhub import EventData, EventHubProducerClient
 from dotenv import load_dotenv
 
-
 # ---------------------------------------------------------------------------
 # Sensor catalogue: realistic ranges for a CNC / press / motor-driven machine
 # ---------------------------------------------------------------------------

@@ -119,7 +119,7 @@ def ensure_destination(
         json={"definition": {"parts": parts}},
     )
     wait_lro(session, r)
-    print(f"[ok]   destination added")
+    print("[ok]   destination added")
 
 
 def main() -> int:

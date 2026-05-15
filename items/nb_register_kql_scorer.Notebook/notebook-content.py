@@ -16,7 +16,8 @@ KQL_DATABASE = "kql-telemetry"
 # CELL ********************
 
 import os
-from azure.kusto.data import KustoConnectionStringBuilder, KustoClient
+
+from azure.kusto.data import KustoClient, KustoConnectionStringBuilder
 
 kcsb   = KustoConnectionStringBuilder.with_aad_device_authentication(KQL_CLUSTER)
 client = KustoClient(kcsb)

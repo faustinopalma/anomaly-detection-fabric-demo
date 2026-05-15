@@ -1,0 +1,29 @@
+# Ruff configuration. Ruff is run locally only - there is no CI gate.
+# Goal: keep `ruff check .` quiet so real issues stand out, without
+# fighting the natural shape of Fabric notebooks.
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = ["_local", ".venv", "data", "infra"]
+
+[tool.ruff.lint]
+# Default rule set (E + F) is fine. Add I (isort) so import order stays tidy.
+# E501 (line-too-long) is off: long KQL/SQL string literals and pandas chains
+# are easier to read on one line than wrapped.
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks: ruff lints each cell in isolation, so symbols imported in an
+# earlier cell read as "undefined" in later cells. Also ignore "imports
+# not at top" because cell 0 is %pip install, and the semicolon-separated
+# one-liners in matplotlib plot cells.
+"**/*.ipynb" = ["F821", "E402", "E702"]
+
+# Fabric notebook scaffolds: the file starts with a `# fabric{` magic
+# header, so imports cannot sit on line 1.
+"items/**/notebook-content.py" = ["E402"]
+
+# Single-letter loop variables in throwaway helper scripts are fine.
+"tools/append_eval_cells.py" = ["E741"]
