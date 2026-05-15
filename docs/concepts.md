@@ -255,49 +255,71 @@ recent normal scores). Above the threshold → row goes into `anomalies`.
 
 ## 9. Window-based models need a small slice of history across batch boundaries
 
-The autoencoder needs **64 contiguous samples for the same (machine,
-sensor)** to score one window. With a properly sized batch (~1 minute,
-hundreds of samples per sensor — see the `ingestionbatching` policy
-below) most windows are built entirely from the new batch. The only
-windows that need extra care are the ones that **straddle the boundary**
-between this batch and the previous one: their first ~63 samples landed
-earlier and only the last sample arrives now. This section explains
-how the engine sees the data, why those boundary windows matter, and
-how we stitch them back without scanning history on every batch.
+The autoencoder needs **`window_size` contiguous samples for the same
+(machine, sensor)** to score one window. In the demo `window_size = 64`,
+but it is not a constant of the pipeline: it is a property of the trained
+model, stored in the `models` table next to the ONNX bytes, and the KQL
+scoring function reads it from there. Retraining with `window_size = 128`
+does not require any change in KQL.
 
-When the engine fires the update policy, it doesn't run the function
-"as written". It transparently injects a filter so that, inside the
-function, every direct mention of `raw_telemetry` only resolves to the
-rows of the **single new batch** — not to the whole table. (Internally
-this is done by wrapping the table reference with a `where extent_id() in
-(...)` clause that names the batch's storage unit.) The intent is
-performance: the function should only re-process what actually arrived,
-not rescan the entire history on every trigger.
+### The problem
 
-That behaviour is great for point-wise scoring (one row in, one score
-out): it keeps the work proportional to the new data.
+When the engine fires the update policy, it doesn't run the function "as
+written". It transparently injects a filter so that, inside the function,
+every direct mention of `raw_telemetry` only resolves to the rows of the
+**single new batch** — not to the whole table. The intent is performance:
+the function should only re-process what actually arrived, not rescan the
+entire history on every trigger.
 
-But how big is "the new batch"? That is governed by the table's
-**ingestion batching policy**. If batches are too small (a default
-behaviour under high event rates is to close on the row cap after only a
-few seconds), most batches won't even contain 64 samples for a given
-(machine, sensor). We pin this down explicitly in `kql/01_tables.kql`:
+How big is that batch? It is governed by the table's **ingestion batching
+policy**. We pin it explicitly in `kql/01_tables.kql` to ~1 minute / 25 000
+rows so that each batch contains hundreds of samples per (machine, sensor)
+— enough to build many full windows of `window_size` samples from the
+batch alone.
 
-```kusto
-.alter table raw_telemetry policy ingestionbatching
-{ "MaximumBatchingTimeSpan": "00:01:00", "MaximumNumberOfItems": 25000, ... }
+But however we size the batch, **one window per (machine, sensor) per
+batch will always be cut by the boundary**: its first `window_size − 1`
+samples landed in the previous batch and only the last sample arrives now.
+If we ignored that case we would silently lose one window per batch per
+sensor.
+
+### The solution
+
+We don't query "more data and divide it down". We do the opposite: we keep
+the new batch as the engine gives it to us, and we **add a tiny, fixed
+tail of history** — exactly `window_size − 1` rows per (machine, sensor)
+— then build windows over the union and keep only the windows that
+**end inside the new batch**:
+
+```
+   new batch (e.g. 600 samples, ts >= T)              \
+   +                                                   |  build windows
+   last (window_size − 1) historical samples (ts < T)  /
+   →
+   emit only windows with window_end >= T
+   (the older windows were already scored in previous runs)
 ```
 
-That gives ~1-minute batches with hundreds of samples per sensor —
-enough to build several full windows per batch.
+Two consequences:
 
-But one batch boundary will always cut a window in half: the first ~63
-samples of a "boundary window" landed in the previous batch, the last
-sample lands in the new one. If we ignored those, we would silently lose
-one window per batch per (machine, sensor). The scoring function therefore
-does one tiny extra read: it pulls the **last `window_size - 1` samples**
-that arrived **before** this batch, via an indirect reference to the
-table:
+- **Bounded extra cost**: at most `window_size − 1` extra rows per
+  (machine, sensor) per batch, regardless of how long the pipeline has
+  been running. No periodic full rescan.
+- **Each window scored exactly once** over the lifetime of the pipeline:
+  no duplicates, no gaps, latency ≈ batching window.
+
+### Why the KQL looks the way it does (technical note)
+
+You might expect the historical tail to be written like this:
+
+```kusto
+raw_telemetry | where ts < new_ts_min | top (window_size - 1) by ts desc
+```
+
+That doesn't work. As described above, the engine rewrites every direct
+reference to `raw_telemetry` inside an update-policy function to "only the
+new batch", so this query would return nothing. To escape that rewrite for
+this one small read, the function uses an **indirect** reference:
 
 ```kusto
 let context = database(current_database()).raw_telemetry
@@ -305,22 +327,11 @@ let context = database(current_database()).raw_telemetry
     | top (window_size - 1) by ts desc;
 ```
 
-The indirect form (`database(current_database()).raw_telemetry`) is **not**
-rewritten by the engine — that's exactly what we need to escape the
-per-batch filter for this specific small read. We then `union` the
-context with the new batch, build windows, and emit only those whose
-`window_end` falls inside the new batch — so each window is scored
-**exactly once across the lifetime of the pipeline**:
+The `database(current_database()).raw_telemetry` form is not rewritten,
+so it sees the full table and gives us the bounded historical tail we
+need.
 
-```kusto
-| where window_end >= new_ts_min   // skip windows fully in the past
-```
-
-The cost is bounded: at most `window_size - 1` extra rows per (machine,
-sensor) per batch, regardless of how long the pipeline has been running.
-No duplicates, no data loss, latency ≈ batching window.
-
-That's the production pattern, codified in `score_univariate_onnx_batch`
+This is the production pattern, codified in `score_univariate_onnx_batch`
 in `kql/03_scoring_functions.kql`. A separate `score_univariate_onnx_lookback`
 exists for ad-hoc use from notebooks (it scans a lookback window from the
 full table — fine for exploration, but **not** safe inside an update policy
@@ -362,8 +373,10 @@ data. The flow is:
 
 1. A Fabric Spark notebook reads months of `raw_telemetry` (or a Lakehouse
    copy of it) for the period considered "normal".
-2. It builds 64-sample windows per (machine, sensor) and fits an
-   autoencoder so that reconstruction error is low on normal windows.
+2. It builds windows of `window_size` samples per (machine, sensor) and
+   fits an autoencoder so that reconstruction error is low on normal
+   windows. The chosen `window_size` is a training-time hyperparameter
+   (64 in the demo) and travels with the model — see §9.
 3. It exports the trained network to ONNX.
 4. It writes the ONNX bytes (base64-encoded) plus metadata into the
    `models` table inside the same Eventhouse.
@@ -381,53 +394,144 @@ Everything above is described for one sensor at a time (univariate). The
 repo also ships a **multivariate** model that watches **all 8 sensors of a
 machine jointly** and emits one anomaly score per window. The mental model
 is identical — train an autoencoder on normal windows, score the
-reconstruction error, threshold it — but two pieces have to be added.
+reconstruction error, threshold it — but the *shape* of the input is
+different (8 features per timestep instead of 1), and that has
+consequences on the data layout and on where the trigger fires.
 
-### 12.1 A wide "shape" of the data, maintained for free
+### 12.1 The pipeline at a glance
 
-The scoring function needs to see all sensors of one machine on the same
-row at the same instant. Computing that pivot inside the update policy on
-every batch would be wasteful, so we let Eventhouse maintain it for us
-with a **materialized view** (`raw_telemetry_wide_mv`):
+```
+                 ingest                    auto-refresh
+   ┌──────────┐  ─────►  ┌────────────────┐  ─────►  ┌──────────────────────────┐
+   │ Event-   │          │ raw_telemetry  │          │ raw_telemetry_wide_mv    │
+   │ stream   │          │ (long table)   │          │ (materialized view)      │
+   └──────────┘          │  ts, machine,  │          │  ts_bin, machine,        │
+                         │  sensor, value │          │  temperature_motor,      │
+                         └────────┬───────┘          │  vibration_radial,       │
+                                  │                  │  current, … (8 columns)  │
+                                  │ fires            └──────────┬───────────────┘
+                                  ▼                             │ read
+                  ┌─────────────────────────────────┐           │
+                  │ update policy on raw_telemetry: │ ◄─────────┘
+                  │  fn_score_multivariate_demo()   │
+                  └────────────────┬────────────────┘
+                                   │ writes
+                                   ▼
+                            ┌──────────────┐
+                            │  anomalies   │
+                            └──────────────┘
+```
 
-| ts_bin              | machine_id | temperature_motor | vibration_radial | current | … |
-|---------------------|------------|-------------------|------------------|---------|---|
-| 11:24:00            | M-001      | 62.31             | 0.42             | 11.7    | … |
-| 11:24:01            | M-001      | 62.40             | 0.41             | 11.6    | … |
+Two new pieces compared to the univariate flow: a **materialized view**
+that maintains the wide shape, and a **second update policy** on the
+`anomalies` table.
 
-One row per `(machine_id, ts_bin = 1s)`, one column per sensor. The MV is
-updated on every ingest into `raw_telemetry`, costs ~1× storage thanks to
-bin-row reconciliation, and gives the multivariate scoring function its
-input in the right shape with no run-time work.
+### 12.2 What the materialized view actually is
 
-### 12.2 A second update policy on the same `anomalies` table
+A materialized view in Eventhouse is **not a separate table** that you
+have to populate yourself. You declare it once with a KQL query over a
+source table, and from that moment the engine keeps it in sync
+automatically:
+
+```kusto
+.create-or-alter materialized-view raw_telemetry_wide_mv on table raw_telemetry
+{
+    raw_telemetry
+    | summarize
+        temperature_motor   = avgif(value, sensor_id == 'temperature_motor'),
+        vibration_radial    = avgif(value, sensor_id == 'vibration_radial'),
+        current             = avgif(value, sensor_id == 'current'),
+        … (8 sensors total)
+        by ts_bin = bin(ts, 1s), machine_id
+}
+```
+
+What you get back when you query the view is a **wide** table — one row
+per `(machine_id, ts_bin = 1s)`, one column per sensor:
+
+| ts_bin    | machine_id | temperature_motor | vibration_radial | current | … |
+|-----------|------------|-------------------|------------------|---------|---|
+| 11:24:00  | M-001      | 62.31             | 0.42             | 11.7    | … |
+| 11:24:01  | M-001      | 62.40             | 0.41             | 11.6    | … |
+
+How the engine maintains it cheaply: each new batch ingested into
+`raw_telemetry` is summarized into partial bin rows; the engine
+reconciles those partial rows with the previously materialized snapshot
+on the fly, so queries against the view always see the latest data
+without a heavy rebuild. Storage stays close to 1× the raw table.
+
+This is the perfect input shape for the multivariate model: one row =
+one "snapshot of the machine at time `ts_bin`". The scoring function can
+build windows of `window_size` such snapshots without any join or pivot
+at runtime.
+
+### 12.3 Why the trigger fires on `raw_telemetry`, not on the MV
+
+You might expect — and it would be conceptually clean — to attach the
+multivariate update policy to `raw_telemetry_wide_mv`, since that's the
+table the scoring function reads. **You can't.** Update policies in
+Eventhouse can only be defined on regular tables: a materialized view
+isn't ingested into, it's *derived*, so there is no ingest event on it
+that could fire a policy.
+
+The trigger therefore stays on `raw_telemetry` (the only table that
+actually receives data), and inside the function we **read from the
+view**:
+
+```
+new batch lands in raw_telemetry
+        │
+        ▼
+update policy fn_score_multivariate_demo() fires
+        │
+        │ reads:
+        │   - raw_telemetry  (direct ref → only the new batch, used to
+        │                     discover which ts_bins are new)
+        │   - raw_telemetry_wide_mv  (indirect ref → the full wide view,
+        │                     for window construction)
+        ▼
+score windows → write rows to `anomalies`
+```
+
+Two consequences of this design that look surprising at first sight, and
+both are direct results of the trigger being on the long table:
+
+- **The function uses two references to the data**: a *direct* one to
+  `raw_telemetry` (to learn the bin range of the new batch — same trick
+  as §9, the engine narrows it to the new batch automatically) and an
+  *indirect* one to the wide MV (`database(current_database()).raw_telemetry_wide_mv`)
+  to actually read the windows. The MV reflects the new batch by the
+  time the function reads it, because views are computed at query time
+  over the latest source state.
+- **An anchor-sensor dedup filter is necessary.** The long table
+  generates ~N rows per `ts_bin` per machine (one per sensor). Each new
+  batch typically contains rows for several sensors, so without care the
+  update policy would fire once per sensor of the new batch — for the
+  same logical timestep. The function therefore checks that the new
+  batch contains at least one row of an *anchor sensor* (the demo uses
+  `temperature_motor`) before producing any output. With 8 sensors this
+  divides the scoring rate by ~8 without losing any window. Trade-off:
+  if the anchor stops reporting, multivariate scoring stops too — pick
+  a sensor that is guaranteed to be present, or move to a small routing
+  helper for production.
+
+### 12.4 A second update policy on the same `anomalies` table
 
 Multiple update policies can target the same destination table. The repo
-attaches a second one alongside the univariate scorer; rows are
+attaches the multivariate scorer alongside the univariate one; rows are
 distinguished downstream by `model_name` (`univariate_ae__*` vs
 `multivariate_ae__*`). One alert table, several model families, one
 Reflex.
 
-### 12.3 Two practical wrinkles worth knowing
+### 12.5 Per-feature normalization is baked into the ONNX graph
 
-- **Per-feature normalization is baked into the ONNX graph.** The
-  multivariate notebook fits per-feature `mean` and `std` and stores them
-  as constant buffers in a tiny `NormalizedScoreWrapper` layer of the ONNX
-  export. This means the KQL function passes raw sensor values from the
-  MV — no scaler step in the function, no risk of train/score drift if
-  somebody forgets to keep the two in sync.
-- **An anchor-sensor dedup filter avoids firing the policy 8× per batch.**
-  A long table with N sensors per machine generates N rows per `ts_bin`
-  per machine. Without care, the multivariate update policy would fire ~N×
-  on every ingest. The function therefore checks that the new batch
-  contains at least one row of an *anchor sensor* (here
-  `temperature_motor`) before producing any output. With 8 sensors this
-  divides the scoring rate by ~8 without losing any window. The trade-off:
-  if the anchor sensor stops reporting, multivariate scoring stops too —
-  pick a sensor that's guaranteed to be present, or move to a small
-  routing table for production.
+The multivariate notebook fits per-feature `mean` and `std` and stores
+them as constant buffers in a tiny `NormalizedScoreWrapper` layer of the
+ONNX export. This means the KQL function passes raw sensor values from
+the MV straight to the model — no scaler step in KQL, no risk of
+train/score drift if somebody forgets to keep the two in sync.
 
-### 12.4 Threshold lives with the model, not with the function
+### 12.6 Threshold lives with the model, not with the function
 
 For the univariate model the threshold is a literal in `fn_score_demo()`
 (`threshold = 3870.0`); calibration means redeploying the function. For
