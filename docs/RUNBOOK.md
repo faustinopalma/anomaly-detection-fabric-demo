@@ -154,11 +154,11 @@ python tools/03_setup_eventstream_destination.py   # adds Eventhouse + Lakehouse
 ## 9. Upload the active training notebooks
 
 ```pwsh
-python tools/upload_notebook.py notebooks/04_train_univariate_ae.ipynb
-python tools/upload_notebook.py notebooks/05_train_multivariate_ae.ipynb
+python tools/upload_notebook.py notebooks/02_train_univariate_ae.ipynb
+python tools/upload_notebook.py notebooks/03_train_multivariate_ae.ipynb
 ```
 
-Creates `nb_04_train_univariate_ae` and `nb_05_train_multivariate_ae`
+Creates `nb_02_train_univariate_ae` and `nb_03_train_multivariate_ae`
 in the workspace; re-runs replace the definition in place.
 
 ---
@@ -195,7 +195,7 @@ schema, or the anomaly catalog.
 
 ```pwsh
 # Open the notebook and run all cells top-to-bottom in the .venv kernel:
-code notebooks/06_simulator_dev.ipynb
+code notebooks/01_simulator_dev.ipynb
 # Sections 1-6 = sandbox + plots
 # Section 7   = writes data/training/
 # Section 8   = writes data/eval/ and anomaly_labels.parquet

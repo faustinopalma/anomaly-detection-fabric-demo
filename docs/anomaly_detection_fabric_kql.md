@@ -531,7 +531,7 @@ In KQL, use `external_artifacts` pointing at the ONNX file and load it with `onn
 ### 4.6 Pattern: multivariate scoring over a wide materialized view (production pattern in this repo)
 
 This is the pattern actually deployed by `kql/05_multivariate_mv.kql` and
-used by `notebooks/05_train_multivariate_ae.ipynb`. It scores a per-machine
+used by `notebooks/03_train_multivariate_ae.ipynb`. It scores a per-machine
 LSTM autoencoder over **all sensors of a machine jointly** without any
 run-time pivot.
 

@@ -16,7 +16,7 @@ Two **versioned offline snapshots** are now committed:
 - Codec: zstd lvl 9, row group 50k. **Train on this snapshot only.**
 
 **Eval (with anomalies)** — `data/eval/` (Section 8 of
-`notebooks/06_simulator_dev.ipynb`, 5 machines × 24 h @ 1 Hz,
+`notebooks/01_simulator_dev.ipynb`, 5 machines × 24 h @ 1 Hz,
 seed `RNG_SEED+1000`, machines `M-101..M-105`):
 - `raw_telemetry.parquet` (~32 MB) and `telemetry_wide.parquet` (~20 MB)
   with the **same schema** as training, plus `is_anomaly` + `fault_type`
@@ -53,7 +53,7 @@ The **Fabric capacity provisioning** workstream is **complete**:
 The **simulator + training redesign** — Phase 1 (physics simulator) is
 **validated in a sandbox notebook**:
 
-- `notebooks/06_simulator_dev.ipynb` runs end-to-end. User confirmed
+- `notebooks/01_simulator_dev.ipynb` runs end-to-end. User confirmed
   2026-05-15 that "il simulatore funziona bene, i grafici non sono
   affatto male."
 - Bug fixed during validation: `np.random.choice` was casting `State`

@@ -2,6 +2,9 @@
 .env
 .env.*.local
 
+# Untracked working folder for personal docs / scratch artifacts
+_local/
+
 # Fabric CLI cache / token store
 .fab/
 **/.fabric/

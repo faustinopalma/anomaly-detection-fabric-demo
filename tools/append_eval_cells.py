@@ -9,7 +9,7 @@ import json
 import uuid
 from pathlib import Path
 
-NB_PATH = Path("notebooks/06_simulator_dev.ipynb")
+NB_PATH = Path("notebooks/01_simulator_dev.ipynb")
 SENTINEL = "EVAL_DATASET_DIR"
 
 

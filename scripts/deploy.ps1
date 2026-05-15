@@ -45,8 +45,6 @@ Assert-EnvVars @(
     'FABRIC_KQLDB_NAME',
     'FABRIC_LAKEHOUSE_NAME',
     'FABRIC_ENVIRONMENT_NAME',
-    'FABRIC_NOTEBOOK_FEATURES_NAME',
-    'FABRIC_NOTEBOOK_TRAIN_NAME',
     'FABRIC_NOTEBOOK_REGISTER_NAME',
     'FABRIC_PIPELINE_NAME',
     'FABRIC_ACTIVATOR_NAME',
@@ -101,19 +99,11 @@ New-FabricItem `
 New-FabricItem -Workspace $ws -Name $env:FABRIC_LAKEHOUSE_NAME   -Type Lakehouse   | Out-Null
 New-FabricItem -Workspace $ws -Name $env:FABRIC_ENVIRONMENT_NAME -Type Environment | Out-Null
 
-# Notebooks: created blank. Source content for each is checked in under
-# items/<name>.Notebook/notebook-content.py and is intended to be loaded
-# either via Fabric Git integration (recommended) or pasted into the
-# notebook in the Fabric portal. `fab import` of the Git source format
-# (.py) is not supported - it expects .ipynb JSON.
-$notebookNames = @(
-    $env:FABRIC_NOTEBOOK_FEATURES_NAME,
-    $env:FABRIC_NOTEBOOK_TRAIN_NAME,
-    $env:FABRIC_NOTEBOOK_REGISTER_NAME
-)
-foreach ($nb in $notebookNames) {
-    New-FabricItem -Workspace $ws -Name $nb -Type Notebook | Out-Null
-}
+# Notebooks: only the legacy `nb_register_kql_scorer` scaffold is created
+# here (still in use to re-apply kql/*.kql). The active training notebooks
+# (01_simulator_dev / 02_train_univariate_ae / 03_train_multivariate_ae)
+# are published from notebooks/ via tools/upload_notebook.py.
+New-FabricItem -Workspace $ws -Name $env:FABRIC_NOTEBOOK_REGISTER_NAME -Type Notebook | Out-Null
 
 # Orchestration + alerting + BI --------------------------------------------
 New-FabricItem -Workspace $ws -Name $env:FABRIC_PIPELINE_NAME       -Type DataPipeline  | Out-Null

@@ -5,8 +5,8 @@ definition in place. Mirrors the auth pattern of the other `tools/*.py`
 scripts (device-code credential cached on disk).
 
 Usage:
-    python tools/upload_notebook.py notebooks/04_train_univariate_ae.ipynb
-    python tools/upload_notebook.py notebooks/04_train_univariate_ae.ipynb --name nb_train_export_onnx
+    python tools/upload_notebook.py notebooks/02_train_univariate_ae.ipynb
+    python tools/upload_notebook.py notebooks/02_train_univariate_ae.ipynb --name nb_custom_alias
 """
 
 from __future__ import annotations

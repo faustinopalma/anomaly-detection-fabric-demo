@@ -39,8 +39,8 @@ current, …). The detection model:
    └─ anomalies              (detections; 365d retention)             │
                 ^                                                     │
                 │                                                     │
-   Reflex (act_anomaly_alerts)               Notebook 04_train_univariate_ae   ──> models (univariate_ae__<sensor>)
-        Teams / email / pipeline trigger     Notebook 05_train_multivariate_ae ──> models (multivariate_ae__<machine>)
+   Reflex (act_anomaly_alerts)               Notebook 02_train_univariate_ae   ──> models (univariate_ae__<sensor>)
+        Teams / email / pipeline trigger     Notebook 03_train_multivariate_ae ──> models (multivariate_ae__<machine>)
                                                                   ^
                                                                   │
                                                 Data Pipeline (pl_retrain) — schedule
@@ -65,24 +65,22 @@ multivariate scoring function reads from.
 | KQL Database     | `kql_telemetry`        | KQLDatabase    | Hot store + ONNX scoring + anomaly table                     |
 | Lakehouse        | `lh_telemetry`         | Lakehouse      | Cold store + medallion tables for training                   |
 | Environment      | `env_anomaly`          | Environment    | Pinned PySpark libs (torch, onnx, onnxruntime, scikit-learn, skl2onnx, azure-kusto-data). See §4.6 about the runtime install fallback. |
-| Notebook         | `nb_prepare_features`  | Notebook       | (legacy scaffold) bronze → silver → gold windows. Superseded by the wide MV — see §4.3. |
-| Notebook         | `nb_train_export_onnx` | Notebook       | (legacy scaffold) generic single-model trainer. Superseded by `nb_04_train_univariate_ae` and `nb_05_train_multivariate_ae`. |
 | Notebook         | `nb_register_kql_scorer`| Notebook      | Reapplies `kql/*.kql` to the database                        |
-| Notebook         | `nb_04_train_univariate_ae`   | Notebook | Per-sensor LSTM autoencoder. Trains on `raw_telemetry`, exports ONNX, uploads as `univariate_ae__<sensor_id>`. Published from [`notebooks/04_train_univariate_ae.ipynb`](../notebooks/04_train_univariate_ae.ipynb). |
-| Notebook         | `nb_05_train_multivariate_ae` | Notebook | Per-machine LSTM autoencoder over 8 sensors via the wide MV. ONNX wrapper has per-feature normalization baked in. Threshold (`mean(loss) + K·std(loss)`) is stored in `metadata.threshold` so KQL doesn't hard-code it. Published from [`notebooks/05_train_multivariate_ae.ipynb`](../notebooks/05_train_multivariate_ae.ipynb). |
-| Data Pipeline    | `pl_retrain`           | DataPipeline   | Schedules the active training notebooks (04, 05) and `nb_register_kql_scorer` |
+| Notebook         | `nb_02_train_univariate_ae`   | Notebook | Per-sensor LSTM autoencoder. Trains on `raw_telemetry`, exports ONNX, uploads as `univariate_ae__<sensor_id>`. Published from [`notebooks/02_train_univariate_ae.ipynb`](../notebooks/02_train_univariate_ae.ipynb). |
+| Notebook         | `nb_03_train_multivariate_ae` | Notebook | Per-machine LSTM autoencoder over 8 sensors via the wide MV. ONNX wrapper has per-feature normalization baked in. Threshold (`mean(loss) + K·std(loss)`) is stored in `metadata.threshold` so KQL doesn't hard-code it. Published from [`notebooks/03_train_multivariate_ae.ipynb`](../notebooks/03_train_multivariate_ae.ipynb). |
+| Data Pipeline    | `pl_retrain`           | DataPipeline   | Schedules the active training notebooks (02, 03) and `nb_register_kql_scorer` |
 | Reflex           | `act_anomaly_alerts`   | Reflex         | Reacts on rows landing in the `anomalies` table              |
 | Semantic Model   | `sm_anomaly`           | SemanticModel  | Direct Lake model over gold + anomalies                      |
 | Report           | `rpt_anomaly`          | Report         | Operational dashboard                                        |
 
-All container items are created **blank**. The legacy `nb_prepare_features`,
-`nb_train_export_onnx`, `nb_register_kql_scorer` ship with starter scaffolds
-in `items/<name>.Notebook/`; the active training notebooks are authored
-locally under `notebooks/` and published with `tools/upload_notebook.py`
-(see §4.6). Schema, scoring logic, Eventstream wiring and Reflex rules are
-configured separately — see §4. Item names use underscores because some
-Fabric item types (Eventstream, Reflex, …) reject hyphens; the defaults are
-defined in `.env.example` and can be overridden in `.env`.
+All container items are created **blank**. `nb_register_kql_scorer` ships
+with a starter scaffold in `items/<name>.Notebook/`; the active training
+notebooks are authored locally under `notebooks/` and published with
+`tools/upload_notebook.py` (see §4.6). Schema, scoring logic, Eventstream
+wiring and Reflex rules are configured separately — see §4. Item names
+use underscores because some Fabric item types (Eventstream, Reflex, …)
+reject hyphens; the defaults are defined in `.env.example` and can be
+overridden in `.env`.
 
 ## 4. Post-deploy configuration
 
@@ -143,7 +141,7 @@ multivariate loop watches all 8 sensors of one machine jointly.
 
 #### Univariate loop
 
-1. `nb_04_train_univariate_ae` reads `raw_telemetry` for one
+1. `nb_02_train_univariate_ae` reads `raw_telemetry` for one
    `(machine_id, sensor_id)`, builds non-overlapping windows of
    `WINDOW_SIZE` samples, trains a small LSTM autoencoder, exports it to
    ONNX and uploads `(name, version, payload, metadata)` into the `models`
@@ -170,7 +168,7 @@ multivariate loop watches all 8 sensors of one machine jointly.
    `vibration_axial`, `vibration_radial`, `current`, `power`, `spindle_rpm`,
    `pressure_hydraulic`). The MV is maintained on every ingest — no batch
    job, ~1× storage overhead, partial bin rows are reconciled automatically.
-2. `nb_05_train_multivariate_ae` reads the MV for one machine, builds
+2. `nb_03_train_multivariate_ae` reads the MV for one machine, builds
    sliding `(WINDOW_SIZE, 8)` windows and trains an LSTM autoencoder
    (encoder/decoder hidden=64, mini-batch SGD, Adam + cosine LR,
    EPOCHS=100, BATCH=32). The exported ONNX is wrapped in a
@@ -222,11 +220,11 @@ v3 (M-001, 8 sensors, threshold ≈ 0.388):
 [`tools/upload_notebook.py`](../tools/upload_notebook.py) uploads a local
 `.ipynb` as a Fabric Notebook item, creating it if absent or updating its
 definition in place. Display name defaults to `nb_<file stem>` so
-`notebooks/05_train_multivariate_ae.ipynb` becomes
-`nb_05_train_multivariate_ae` in the workspace.
+`notebooks/03_train_multivariate_ae.ipynb` becomes
+`nb_03_train_multivariate_ae` in the workspace.
 
 The Fabric Spark runtime ships a curated package set that does **not**
-include `azure-kusto-data`. Notebooks 04 and 05 therefore include a `%pip
+include `azure-kusto-data`. Notebooks 02 and 03 therefore include a `%pip
 install -q azure-kusto-data azure-identity python-dotenv` cell at the very
 top. On a local `.venv` it is a no-op; in Fabric it installs the SDK on
 first run (kernel restart). For production it is recommended to attach

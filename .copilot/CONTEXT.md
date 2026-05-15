@@ -9,8 +9,9 @@ Copilot session. Update only when these facts actually change.
 |---|---|
 | `simulator-local/simulate_machines.py` | Local synthetic telemetry generator. Sends to Eventstream via the Event Hubs–compatible custom endpoint. Reads `EVENTSTREAM_CONNECTION_STRING` from `.env`. |
 | `simulator-cloud/` | Same simulator, packaged for always-on Azure Container Apps deployment. |
-| `notebooks/04_train_univariate_ae.ipynb` | Per-sensor LSTM AE (one model per sensor). |
-| `notebooks/05_train_multivariate_ae.ipynb` | Per-machine multivariate LSTM AE over the wide MV. Currently 1×LSTM enc + 1×LSTM dec, threshold = μ + K·σ. |
+| `notebooks/01_simulator_dev.ipynb` | Physics simulator + offline dataset builder (`data/training/`, `data/eval/`). |
+| `notebooks/02_train_univariate_ae.ipynb` | Per-sensor LSTM AE (one model per sensor). |
+| `notebooks/03_train_multivariate_ae.ipynb` | Per-machine multivariate LSTM AE over the wide MV. Currently 1×LSTM enc + 1×LSTM dec, threshold = μ + K·σ. |
 | `tools/` | Python helpers: Eventstream wiring (`03_setup_eventstream_destination.py`), KQL setup, anomaly injection, notebook publishing. |
 | `scripts/deploy.ps1` | Main idempotent deploy: workspace + items on an existing Fabric capacity. |
 | `scripts/create-capacity.ps1` | One-shot Bicep deployment of a new Fabric capacity. |
@@ -53,7 +54,7 @@ breaking change.
 - Event payload is `{machineId, sensorId, ts, value, quality}`. `ts` is
   ISO-8601 UTC with microseconds, `Z`-suffixed.
 - Item names use **underscores** throughout (some Fabric item types reject
-  hyphens). E.g. `kql_telemetry`, `es_machines`, `nb_train_export_onnx`.
+  hyphens). E.g. `kql_telemetry`, `es_machines`, `nb_register_kql_scorer`.
 - KQL DB ↔ Eventhouse linking via REST API requires the parent
   Eventhouse's **item id** (GUID), not its name. Passing
   `parentEventhouseName` is silently ignored and Fabric auto-creates a
