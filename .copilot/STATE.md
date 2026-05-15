@@ -12,14 +12,28 @@ The **Fabric capacity provisioning** workstream is **complete**:
   `italynorth`, and runs the Bicep deployment.
 - Pushed in commit `5c9f196` on `main`.
 
-The **simulator + training redesign** workstream is **planned, not started**.
-See [`PLAN.md`](PLAN.md) for the 4 phases. Six open questions are listed
-there and need answers from the user before any code is written.
+The **simulator + training redesign** — Phase 1 (physics simulator) is
+**validated in a sandbox notebook**:
+
+- `notebooks/06_simulator_dev.ipynb` runs end-to-end. User confirmed
+  2026-05-15 that "il simulatore funziona bene, i grafici non sono
+  affatto male."
+- Bug fixed during validation: `np.random.choice` was casting `State`
+  enum members to a fixed-length numpy string array and truncating the
+  longer names (`State.STARTUP` → `'State.S'`). Fixed by picking an
+  index instead and indexing the original tuple.
+- Phases 2-4 not started; six open questions in `PLAN.md` still pending.
 
 ## Active focus
 
-Waiting on the user's answers to the 6 open questions in `PLAN.md`
-(Section "Open questions").
+Decide whether to:
+1. Port the validated simulator from the notebook into
+   `simulator-local/simulate_machines.py` (preserving the existing CLI
+   and JSON payload), and/or
+2. Tune coefficients further (vibrations vs jitter, thermal max temp,
+   IDLE/OFF mix) before porting.
+
+Then move on to the 6 open questions in `PLAN.md` to unblock Phases 2-4.
 
 ## Recent context the user might mention
 
