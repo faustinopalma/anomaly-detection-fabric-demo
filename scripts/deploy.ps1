@@ -80,12 +80,22 @@ Write-Host "Provisioning items in $ws..." -ForegroundColor Cyan
 New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTSTREAM_NAME -Type Eventstream | Out-Null
 
 # Hot path: Eventhouse + KQL DB --------------------------------------------
+# IMPORTANT: the KQL Database must be linked to the Eventhouse via
+# `parentEventhouseItemId` (the *item id*, not the name) plus
+# `databaseType=ReadWrite`. Passing only `parentEventhouseName` is silently
+# ignored by the Fabric REST API: the call still succeeds, but Fabric
+# auto-creates a second Eventhouse named "<dbname>_auto" and puts the DB
+# inside it, leaving the Eventhouse we just created empty and orphaned.
 New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME  -Type Eventhouse  | Out-Null
+$ehId = Get-FabricItemId -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME -Type Eventhouse
 New-FabricItem `
     -Workspace $ws `
     -Name      $env:FABRIC_KQLDB_NAME `
     -Type      KQLDatabase `
-    -Params    @{ parentEventhouseName = $env:FABRIC_EVENTHOUSE_NAME } | Out-Null
+    -Params    @{
+        databaseType            = 'ReadWrite'
+        parentEventhouseItemId  = $ehId
+    } | Out-Null
 
 # Cold path: Lakehouse + Spark Environment ---------------------------------
 New-FabricItem -Workspace $ws -Name $env:FABRIC_LAKEHOUSE_NAME   -Type Lakehouse   | Out-Null

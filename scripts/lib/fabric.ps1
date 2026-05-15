@@ -75,6 +75,27 @@ function New-FabricItem {
     return $itemPath
 }
 
+function Get-FabricItemId {
+    # Returns the GUID of an existing Fabric item, or throws if not found.
+    # Uses `fab get <path> -q id`, which prints the raw value.
+    param(
+        [Parameter(Mandatory)][string]$Workspace,   # e.g. /my-ws.Workspace
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Type         # e.g. Eventhouse
+    )
+
+    $itemPath = "$Workspace/$Name.$Type"
+    $out = Invoke-Fab -FabArgs @('get', $itemPath, '-q', 'id') | Out-String
+    # `fab get -q id` may print the value with or without a leading "* " TTY
+    # marker; trim either way.
+    $id = ($out -split "`r?`n" | ForEach-Object { ($_ -replace '^\s*\*\s*', '').Trim() } |
+           Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | Select-Object -First 1)
+    if (-not $id) {
+        throw "Could not extract item id for $itemPath. Raw output:`n$out"
+    }
+    return $id
+}
+
 function Import-FabricItem {
     param(
         [Parameter(Mandatory)][string]$Workspace,
