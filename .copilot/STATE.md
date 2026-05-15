@@ -1,23 +1,44 @@
 # Current state
 
-_Last updated: 2026-05-15_
+_Last updated: 2026-05-16_
 
 ## Where we are
 
-A **versioned offline training snapshot** is now committed under
-`data/training/` (commit `422cb09`):
+Two **versioned offline snapshots** are now committed:
 
-- `raw_telemetry.parquet` — long-form events
-  `{machineId, sensorId, ts, value, quality}` mirroring the live KQL
-  `raw_telemetry` schema (~3.0 MB, 345 600 rows).
-- `telemetry_wide.parquet` — post-pivot per-`(ts, machineId)` layout
-  with 8 sensor columns + `state` (ground truth) + `load`
-  (~2.1 MB, 43 200 rows).
+**Training (clean)** — `data/training/` (commit `fdb5ce1`,
+5 machines × 24 h @ 1 Hz, seed `RNG_SEED`, machines `M-001..M-005`):
+- `raw_telemetry.parquet` (~32 MB, 3 456 000 rows) — long form
+  `{machineId, sensorId, ts, value, quality}` mirroring KQL `raw_telemetry`.
+- `telemetry_wide.parquet` (~20 MB, 432 000 rows) — pivoted
+  `{ts, machineId, state, load, 8 sensors}` with ground-truth `state`.
 - `sample_head.csv` — 200-row PR-friendly sample.
-- Built by Section 7 of `notebooks/06_simulator_dev.ipynb`
-  (3 machines × 4 h @ 1 Hz, deterministic per-machine seeds). Schema
-  is **the contract**: the same model code will run later against
-  `spark.read.kusto(...)` in Fabric without changes.
+- Codec: zstd lvl 9, row group 50k. **Train on this snapshot only.**
+
+**Eval (with anomalies)** — `data/eval/` (Section 8 of
+`notebooks/06_simulator_dev.ipynb`, 5 machines × 24 h @ 1 Hz,
+seed `RNG_SEED+1000`, machines `M-101..M-105`):
+- `raw_telemetry.parquet` (~32 MB) and `telemetry_wide.parquet` (~20 MB)
+  with the **same schema** as training, plus `is_anomaly` + `fault_type`
+  in the wide form.
+- `anomaly_labels.parquet` — 12-row episode catalog
+  `{episode_id, machine_id, fault_type, onset_ts, end_ts, duration_s,
+    severity_max, affected_sensor, pattern, notes}` (ground truth).
+- 12 episodes × 3 fault families, all on dedicated machines so
+  M-101/M-102 stay clean as eval-time normals:
+    - `bearing` on M-103 (4 episodes, severity 0.30 → 1.00, ramp
+      degradation on vibrations + bearing temp + current/power +
+      load-scaled Poisson spikes).
+    - `hydraulic_leak` on M-104 (4 episodes, mix of `ramp` slow leak
+      and `oscillation` 60 s pump duty-cycling on `pressure_hydraulic`,
+      with small power compensation).
+    - `sensor_stuck` on M-105 (4 episodes on
+      `temperature_motor`/`pressure_hydraulic`/`vibration_radial`/`current`,
+      sensor frozen at the last pre-onset value, `quality=0` in the
+      long form).
+- Schema is identical to training so the same model code runs against
+  both, and later against `spark.read.kusto(...)` in Fabric without
+  changes.
 
 
 
@@ -45,12 +66,15 @@ The **simulator + training redesign** — Phase 1 (physics simulator) is
 
 Next candidate steps (pick one):
 1. Open a new `notebooks/07_train_offline.ipynb` that loads
-   `data/training/telemetry_wide.parquet` and starts iterating on model
-   architectures (windowed AE, IsolationForest baseline, etc.).
-2. Port the validated simulator from the notebook into
-   `simulator-local/simulate_machines.py` (preserve CLI + JSON payload).
+   `data/training/telemetry_wide.parquet`, trains on clean only, and
+   evaluates against `data/eval/telemetry_wide.parquet` using
+   `data/eval/anomaly_labels.parquet` as ground truth (PR-AUC,
+   per-fault-family detection delay).
+2. Port the validated simulator + injectors from the notebook into
+   `simulator-local/simulate_machines.py` (preserve CLI + JSON payload
+   for streaming into the Fabric eventstream).
 3. Tune simulator coefficients further (vibrations vs jitter, thermal
-   max temp, IDLE/OFF mix) and regenerate the dataset.
+   max temp, IDLE/OFF mix) and regenerate both snapshots.
 
 The 6 open questions in `PLAN.md` still block Phases 2-4.
 
