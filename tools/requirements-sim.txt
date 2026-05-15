@@ -17,3 +17,6 @@ ipykernel>=6.29
 # (notebooks/01_simulator_dev.ipynb Sections 1-8)
 matplotlib>=3.8
 pyarrow>=15.0
+
+# Dev tooling (optional). Lint with `ruff check .`; config in pyproject.toml.
+ruff>=0.6
