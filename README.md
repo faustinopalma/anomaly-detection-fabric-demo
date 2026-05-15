@@ -76,8 +76,11 @@ silent until it expires.
 ├── tools/                                # Python helpers (Eventstream wiring, KQL setup, anomaly inject, notebook publish)
 ├── simulator-local/                      # run the simulator locally
 ├── simulator-cloud/                      # always-on simulator on Azure Container Apps
+├── infra/
+│   └── fabric-capacity.bicep             # Bicep template for a Microsoft.Fabric/capacities resource
 └── scripts/
-    ├── deploy.ps1                        # main entrypoint
+    ├── create-capacity.ps1               # one-shot: create the Fabric capacity (uses infra/fabric-capacity.bicep)
+    ├── deploy.ps1                        # main entrypoint: workspace + items on an existing capacity
     └── lib/
         ├── env.ps1                      # .env loader + validation
         └── fabric.ps1                   # thin idempotent helpers around `fab`
