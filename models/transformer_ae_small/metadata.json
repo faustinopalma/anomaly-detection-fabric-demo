@@ -1,0 +1,80 @@
+{
+  "model": "transformer_ae_small",
+  "window": 64,
+  "stride_train": 16,
+  "stride_eval": 1,
+  "n_features": 8,
+  "d_model": 56,
+  "n_heads": 4,
+  "n_enc_layers": 2,
+  "n_dec_layers": 2,
+  "ff_dim": 160,
+  "n_parameters": 161984,
+  "threshold": 0.015435788780450821,
+  "threshold_rule": "p99.5 on training-val window scores",
+  "training": {
+    "epochs": 12,
+    "batch": 256,
+    "lr": 0.0003,
+    "weight_decay": 1e-05,
+    "best_val_loss": 0.006409636086779918,
+    "device": "cuda"
+  },
+  "metrics": {
+    "global_pr_auc": 0.5692070212455775,
+    "per_family": {
+      "bearing": 0.2984142011829962,
+      "hydraulic_leak": 0.4017517146780878,
+      "sensor_stuck": 0.4965965089524873
+    },
+    "healthy_fp_rate": 0.03277495406495335,
+    "detection_delay_summary": [
+      {
+        "fault_type": "bearing",
+        "n": 8,
+        "detected": 8,
+        "median_delay_s": 578.0,
+        "p90_delay_s": 2365.3999999999996
+      },
+      {
+        "fault_type": "hydraulic_leak",
+        "n": 9,
+        "detected": 9,
+        "median_delay_s": 1263.0,
+        "p90_delay_s": 2460.6000000000004
+      },
+      {
+        "fault_type": "sensor_stuck",
+        "n": 7,
+        "detected": 7,
+        "median_delay_s": 664.0,
+        "p90_delay_s": 4727.000000000003
+      }
+    ]
+  },
+  "onnx": {
+    "ir_version": 9,
+    "fp32": {
+      "path": "models\\transformer_ae_small\\model.onnx",
+      "raw_bytes": 827726,
+      "raw_kb": 808.3,
+      "base64_bytes": 1103636,
+      "base64_kb": 1077.8,
+      "kusto_row_fits": false,
+      "budget_kb": 1024.0
+    },
+    "fp16": {
+      "path": "models\\transformer_ae_small\\model.fp16.onnx",
+      "raw_bytes": 504805,
+      "raw_kb": 493.0,
+      "base64_bytes": 673076,
+      "base64_kb": 657.3,
+      "kusto_row_fits": true,
+      "budget_kb": 1024.0
+    },
+    "parity_fp32_max_abs_diff": 9.313225746154785e-09,
+    "parity_fp16_max_abs_diff": 5.703279748558998e-05,
+    "parity_fp16_max_rel_diff": 0.018054665997624397
+  },
+  "kusto_deployable": true
+}

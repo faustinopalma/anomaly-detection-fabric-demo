@@ -1,0 +1,85 @@
+{
+  "model": "conv_gru_ae",
+  "architecture_version": 2,
+  "window": 64,
+  "stride_train": 16,
+  "stride_eval": 1,
+  "n_features": 8,
+  "conv_channels": [
+    24,
+    48,
+    96
+  ],
+  "gru_hidden": 48,
+  "encoder_bidirectional": true,
+  "bottleneck_dim": 48,
+  "decoder_hidden": 96,
+  "n_parameters": 162536,
+  "threshold": 0.8369802236557007,
+  "threshold_rule": "p99.5 on training-val window scores",
+  "training": {
+    "epochs": 20,
+    "batch": 256,
+    "lr": 0.0005,
+    "weight_decay": 1e-05,
+    "best_val_loss": 0.10835760481352685,
+    "device": "cuda"
+  },
+  "metrics": {
+    "global_pr_auc": 0.4663760066232373,
+    "per_family": {
+      "bearing": 0.2429792249447914,
+      "hydraulic_leak": 0.22908828542188353,
+      "sensor_stuck": 0.44206176473433295
+    },
+    "healthy_fp_rate": 0.03675400291120815,
+    "detection_delay_summary": [
+      {
+        "fault_type": "bearing",
+        "n": 8,
+        "detected": 8,
+        "median_delay_s": 1139.0,
+        "p90_delay_s": 5567.099999999999
+      },
+      {
+        "fault_type": "hydraulic_leak",
+        "n": 9,
+        "detected": 9,
+        "median_delay_s": 1663.0,
+        "p90_delay_s": 4363.8
+      },
+      {
+        "fault_type": "sensor_stuck",
+        "n": 7,
+        "detected": 7,
+        "median_delay_s": 1861.0,
+        "p90_delay_s": 4371.600000000001
+      }
+    ]
+  },
+  "onnx": {
+    "ir_version": 9,
+    "fp32": {
+      "path": "models\\conv_gru_ae\\model.onnx",
+      "raw_bytes": 666961,
+      "raw_kb": 651.3,
+      "base64_bytes": 889284,
+      "base64_kb": 868.4,
+      "kusto_row_fits": true,
+      "budget_kb": 1024.0
+    },
+    "fp16": {
+      "path": "models\\conv_gru_ae\\model.fp16.onnx",
+      "raw_bytes": 342269,
+      "raw_kb": 334.2,
+      "base64_bytes": 456360,
+      "base64_kb": 445.7,
+      "kusto_row_fits": true,
+      "budget_kb": 1024.0
+    },
+    "parity_fp32_max_abs_diff": 7.450580596923828e-08,
+    "parity_fp16_max_abs_diff": 0.0001341402530670166,
+    "parity_fp16_max_rel_diff": 0.0011543466243892908
+  },
+  "kusto_deployable": true
+}

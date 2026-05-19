@@ -36,3 +36,13 @@ __pycache__/
 venv/
 
 .auth_record.json
+
+# Generated telemetry datasets (regeneratable via notebooks/01_simulator_dev.ipynb)
+# Kept locally only — too large for git. The small companions stay committed:
+#   - data/training/sample_head.csv  (200-row preview)
+#   - data/eval/anomaly_labels.parquet (ground-truth episode catalog)
+data/training/raw_telemetry.parquet
+data/training/telemetry_wide.parquet
+data/eval/raw_telemetry.parquet
+data/eval/telemetry_wide.parquet
+

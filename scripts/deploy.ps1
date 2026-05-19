@@ -55,12 +55,25 @@ Assert-EnvVars @(
 # --- Authenticate (device code) ------------------------------------------
 # Skip if already authenticated; `fab auth login` requires an interactive
 # console (Windows broker) and will fail otherwise.
-$authStatus = & fab auth status 2>&1
+$fabExe = Resolve-FabCli
+$prevPyIo = $env:PYTHONIOENCODING
+$env:PYTHONIOENCODING = 'utf-8'
+try {
+    $authStatus = & $fabExe auth status 2>&1
+} finally {
+    $env:PYTHONIOENCODING = $prevPyIo
+}
 if ($LASTEXITCODE -eq 0 -and ($authStatus -match 'Logged in')) {
     Write-Host "Already authenticated to Fabric - skipping login." -ForegroundColor DarkGray
 } else {
     Write-Host "Authenticating to Fabric (interactive)..." -ForegroundColor Cyan
-    & fab auth login --tenant $env:FABRIC_TENANT_ID
+    $prevPyIo = $env:PYTHONIOENCODING
+    $env:PYTHONIOENCODING = 'utf-8'
+    try {
+        & $fabExe auth login --tenant $env:FABRIC_TENANT_ID
+    } finally {
+        $env:PYTHONIOENCODING = $prevPyIo
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "fab auth login failed. Run it manually in a regular terminal first: fab auth login --tenant $env:FABRIC_TENANT_ID"
     }
@@ -86,14 +99,10 @@ New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTSTREAM_NAME -Type Eventstre
 # inside it, leaving the Eventhouse we just created empty and orphaned.
 New-FabricItem -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME  -Type Eventhouse  | Out-Null
 $ehId = Get-FabricItemId -Workspace $ws -Name $env:FABRIC_EVENTHOUSE_NAME -Type Eventhouse
-New-FabricItem `
-    -Workspace $ws `
-    -Name      $env:FABRIC_KQLDB_NAME `
-    -Type      KQLDatabase `
-    -Params    @{
-        databaseType            = 'ReadWrite'
-        parentEventhouseItemId  = $ehId
-    } | Out-Null
+New-FabricKQLDatabase `
+    -Workspace          $ws `
+    -Name               $env:FABRIC_KQLDB_NAME `
+    -ParentEventhouseId $ehId | Out-Null
 
 # Cold path: Lakehouse + Spark Environment ---------------------------------
 New-FabricItem -Workspace $ws -Name $env:FABRIC_LAKEHOUSE_NAME   -Type Lakehouse   | Out-Null

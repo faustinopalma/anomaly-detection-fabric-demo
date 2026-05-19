@@ -1,0 +1,55 @@
+{
+  "model": "transformer_ae",
+  "window": 64,
+  "stride_train": 16,
+  "stride_eval": 1,
+  "n_features": 8,
+  "d_model": 64,
+  "n_heads": 4,
+  "n_enc_layers": 2,
+  "n_dec_layers": 2,
+  "ff_dim": 128,
+  "n_parameters": 180808,
+  "threshold": 0.011169527657330036,
+  "threshold_rule": "p99.5 on training-val window scores",
+  "training": {
+    "epochs": 12,
+    "batch": 256,
+    "lr": 0.0003,
+    "weight_decay": 1e-05,
+    "best_val_loss": 0.005080920623404232,
+    "device": "cuda"
+  },
+  "metrics": {
+    "global_pr_auc": 0.5563999813461508,
+    "per_family": {
+      "bearing": 0.30921704196111316,
+      "hydraulic_leak": 0.36551551990132947,
+      "sensor_stuck": 0.46492707095141894
+    },
+    "healthy_fp_rate": 0.028610971914000048,
+    "detection_delay_summary": [
+      {
+        "fault_type": "bearing",
+        "n": 8,
+        "detected": 8,
+        "median_delay_s": 741.0,
+        "p90_delay_s": 2813.9999999999995
+      },
+      {
+        "fault_type": "hydraulic_leak",
+        "n": 9,
+        "detected": 9,
+        "median_delay_s": 1079.0,
+        "p90_delay_s": 2261.8
+      },
+      {
+        "fault_type": "sensor_stuck",
+        "n": 7,
+        "detected": 7,
+        "median_delay_s": 847.0,
+        "p90_delay_s": 1853.2
+      }
+    ]
+  }
+}
