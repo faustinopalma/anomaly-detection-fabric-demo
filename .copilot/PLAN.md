@@ -1,77 +1,88 @@
-# Active plan — Simulator + training redesign
+# Active plan — Improve model recall (run on GPU PC)
 
-_Last updated: 2026-05-15_
+_Last updated: 2026-05-21_
 
 ## Goal
+Raise live recall from **17.7% → ≥60%** while keeping Precision ≥ 95%.
+Median detection latency ≤ 90 s.
 
-Make the demo physically credible and able to handle realistic operating
-conditions: multiple valid load regimes, valid transients, machines that
-turn off and back on. Make the training pipeline aware of all of this.
+Diagnosis from `tools/06_correlate.py --lookback 2h --grace 2m`:
+- Precision 100% (FP=0). No false alarms — threshold is not too low.
+- Recall is low specifically on **drift** and **sensor_stuck** for
+  machines M-002..M-005. Bearing on M-001 is detected reliably.
+- Hypothesis: window=64 s is too short for slow overlays (drift 8–20 s
+  ramps + stuck for 5–20 s) → score gets diluted by 50+ s of normal data.
 
-## Phases
+## Phase 0 — GPU PC setup
 
-### Phase 1 — Physics-based simulator
-- [ ] Replace independent per-sensor generators with a single machine
-      state model that produces all 8 sensors coherently
-      (load → current/RPM/power/vibration/temperature couplings, with
-      first-order thermal dynamics).
-- [ ] Add a probabilistic FSM with states: `OFF`, `STARTUP`, `IDLE`,
-      `PRODUCTION_LIGHT`, `PRODUCTION_HEAVY`, `RAMP_UP`, `RAMP_DOWN`,
-      `SHUTDOWN`. Transitions between load regimes always go through a
-      `RAMP_*` state.
-- [ ] During `OFF`, the simulator stops publishing (real gap) — does
-      **not** publish zeros. (See open question #2.)
-- [ ] Keep the event payload identical
-      (`machineId, sensorId, ts, value, quality`).
-- [ ] Add CLI flags: `--off-prob`, `--regime-mix`, `--shift-pattern`.
+- [ ] `git pull origin main` (commit `a15345a` or later).
+- [ ] Recreate `.venv` with CUDA torch (see `.copilot/STATE.md`).
+- [ ] Copy `.env` from the laptop (or recreate from `.env.example` —
+      same values; do not change Fabric IDs).
+- [ ] Verify `torch.cuda.is_available() == True`.
+- [ ] Login: `az login --tenant <tenant>` and `fab auth login`.
 
-### Phase 2 — Off/on awareness in the KQL pipeline
-- [ ] Decide design: option **A** (new `machine_state` table updated by
-      a policy on `raw_telemetry`), option **B** (filter only at training
-      time), option **C** (add `is_running` to wide MV). Current lean: A+B.
-- [ ] Update `scripts/deploy.ps1` if new tables/policies are needed.
-- [ ] Update Activator rules to ignore alerts when `state != RUNNING` or
-      `ts < startup_time + grace_seconds`.
+## Phase 1 — Quick win: threshold sweep (no retrain)
 
-### Phase 3 — Training data selection + transient augmentation
-- [ ] Segment the timeline into continuous `RUNNING` runs; drop runs
-      shorter than `min_run_length` (e.g. 5 min).
-- [ ] Tag each window as `STEADY` or `TRANSIENT` (e.g. via |Δload|
-      threshold or via the simulator-published state, see question #3).
-- [ ] Sliding window with adaptive stride: `STEADY` stride 16,
-      `TRANSIENT` stride 1.
-- [ ] Augment transient windows: time warping ±20%, magnitude scaling
-      ±10%, controlled jitter, until ratio reaches ~30/70 transient/steady.
-- [ ] Stratify train/val split by whole segments (no leakage across
-      window boundaries).
+- [ ] Compute new candidate thresholds offline in
+      `notebooks/06_train_transformer_small.ipynb` (final eval cell):
+      try p99 (~0.010) and p98 (~0.008).
+- [ ] For each candidate, edit `kql/04_update_policy.kql` to update the
+      `THRESHOLD` constant. Push via `tools/02_setup_kql_tables.py`.
+- [ ] Wait 5 min for new ingest, then run
+      `python tools/06_correlate.py --lookback 1h --grace 2m`.
+- [ ] Pick the lowest threshold where Precision still ≥ 95%.
+- [ ] If recall still < 40%, proceed to Phase 2.
 
-### Phase 4 — Model architecture
-- [ ] Pick architecture (see open question #4). Current recommendation:
-      **Conv1D + GRU autoencoder** (small, ONNX-friendly, runs on CPU
-      for KQL inference). Stretch goal: **VAE** if multimodality matters.
-- [ ] Loss: MSE on normalized features + L1 on time-step deltas.
-- [ ] Threshold: per-regime (cluster latents) or 99.5th percentile on
-      cleaned training set, instead of a single global μ + K·σ.
-- [ ] Re-export ONNX with the new architecture; update KQL scorer.
+## Phase 2 — Longer window + retrain
 
-## Open questions (need user input before coding)
+- [ ] Regenerate datasets via `notebooks/01_simulator_dev.ipynb`
+      sections 7.1 (training, 10×5d) and 8 (eval, 8 machines).
+      ~10 min on any CPU. Outputs:
+      `data/training/telemetry_wide.parquet`,
+      `data/eval/telemetry_wide.parquet`,
+      `data/eval/anomaly_labels.parquet`.
+- [ ] In `notebooks/06_train_transformer_small.ipynb`:
+      - [ ] Set `WIN = 128` (was 64). Keep `STRIDE = 8` or set to 16 to
+            keep training-set size manageable.
+      - [ ] Re-fit `StandardScaler` on the new wide table.
+      - [ ] Train (12 epochs, batch 256, lr 3e-4). On GPU expect
+            ~5–10 min.
+      - [ ] Verify val loss < 0.008 and PR-AUC ≥ 0.65 on eval set.
+- [ ] Export ONNX with the new `WIN`. Save under
+      `models/transformer_ae_w128/` to keep the old one for rollback.
+- [ ] Update `kql/04_update_policy.kql` so `WIN = 128` and the new
+      threshold are used. Push via `tools/02_setup_kql_tables.py`.
+- [ ] Run `tools/05_register_model.py` to upload the new ONNX into
+      Fabric and switch the active model row.
+- [ ] Re-run `tools/06_correlate.py --lookback 1h --grace 2m`. Target:
+      Recall ≥ 60%, Precision ≥ 95%, median latency ≤ 90 s.
 
-1. **FSM granularity**: Markov FSM with 5–7 states, OR deterministic
-   "recipe" per machine (e.g. every 15 min run a fixed cycle)?
-2. **OFF representation**: silence (no events) OR `quality=0` events?
-3. **Regime ground truth**: should the simulator publish a `state`
-   channel that the training pipeline can use, or must everything be
-   inferred from sensors only?
-4. **GPU**: is the tunnel-connected GPU PC available for training? If
-   yes, Transformer/VAE become viable; if not, stay with Conv+GRU.
-5. **Schema compatibility**: can existing KQL tables (`raw_telemetry`,
-   wide MV) be modified, or must changes be additive?
-6. **Rollout**: one big PR, or incremental commits (Phase 1 → 2 → 3 → 4)?
+## Phase 3 — Per-sensor scoring (only if Phase 2 still falls short)
 
-## How to use this file
+- [ ] In the model's score function, replace
+      `score = mean((x - x_hat) ** 2)` with
+      `score = max(mean_over_time((x - x_hat) ** 2, axis=time))`
+      (i.e. max across the 8 features instead of mean). This makes a
+      drift on a single sensor not get drowned out.
+- [ ] Recompute threshold (p99.5 on the new score distribution).
+- [ ] Re-export ONNX, push, re-register, re-validate.
 
-- Tick boxes as items complete.
-- When a phase finishes, move its checklist to a `## Done` section at
-  the bottom (or delete it if everything is reflected in `STATE.md`).
-- Add new phases at the top of "Phases" only after agreement with the
-  user.
+## Phase 4 — Demo cleanup (do last)
+
+- [ ] Restore `SIM_ANOMALY_PROB=0.0005` on `ca-simulator`.
+- [ ] Wait 1 hour, re-run correlation to confirm metrics under realistic
+      injection density.
+- [ ] Update `.copilot/STATE.md` with final metrics.
+- [ ] Tag the repo (`v1.0-demo`).
+
+## Done (carry-over from earlier sessions)
+
+- ✅ Fabric environment bootstrap (workspace, eventhouse, KQL DB,
+  eventstream, dashboard).
+- ✅ Cloud simulator with FSM + load coupling + injection markers.
+- ✅ End-to-end real-time scoring pipeline (raw → wide → scores).
+- ✅ Ground-truth correlation (`kql/05`, `06`, `07`,
+  `tools/06_correlate.py`).
+- ✅ FP/FN classification + Precision/Recall/F1 metrics + dashboard
+  tiles (commit `a15345a`).
