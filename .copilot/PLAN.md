@@ -1,88 +1,89 @@
-# Active plan — Improve model recall (run on GPU PC)
+# Plan
 
 _Last updated: 2026-05-21_
 
-## Goal
-Raise live recall from **17.7% → ≥60%** while keeping Precision ≥ 95%.
-Median detection latency ≤ 90 s.
+## Phase 1 — Validate the per-machine pipeline (NOW)
 
-Diagnosis from `tools/06_correlate.py --lookback 2h --grace 2m`:
-- Precision 100% (FP=0). No false alarms — threshold is not too low.
-- Recall is low specifically on **drift** and **sensor_stuck** for
-  machines M-002..M-005. Bearing on M-001 is detected reliably.
-- Hypothesis: window=64 s is too short for slow overlays (drift 8–20 s
-  ramps + stuck for 5–20 s) → score gets diluted by 50+ s of normal data.
+1. Wait ~15 min for fresh `M-001`/`M-002` data to accumulate after the
+   simulator restart (revision `ca-simulator--0000001` in
+   `rg-fabric-demo`).
+2. Quick check that BOTH machines are detecting anomalies under the new
+   policies:
+   ```kql
+   anomalies
+   | where detected_at > ago(15m)
+   | summarize n=count() by model_name, machine_id
+   ```
+   Expect rows for both `transformer_ae_small__M-001` and
+   `transformer_ae_small__M-002`.
+3. Run live correlation:
+   ```powershell
+   .\.venv\Scripts\python.exe tools\06_correlate.py --lookback 30m --grace 2m
+   ```
+   Per-machine targets (each, not aggregate):
+   - Precision >= 95%
+   - Recall >= 60%
 
-## Phase 0 — GPU PC setup
+## Phase 2 — If recall is low (< 60% on either machine)
 
-- [ ] `git pull origin main` (commit `a15345a` or later).
-- [ ] Recreate `.venv` with CUDA torch (see `.copilot/STATE.md`).
-- [ ] Copy `.env` from the laptop (or recreate from `.env.example` —
-      same values; do not change Fabric IDs).
-- [ ] Verify `torch.cuda.is_available() == True`.
-- [ ] Login: `az login --tenant <tenant>` and `fab auth login`.
+Options to try, cheapest first:
 
-## Phase 1 — Quick win: threshold sweep (no retrain)
+A. **Lower threshold quantile.** Retrain (~30 s each) with
+   `--threshold-quantile 0.99` and re-register. No code or KQL changes.
 
-- [ ] Compute new candidate thresholds offline in
-      `notebooks/06_train_transformer_small.ipynb` (final eval cell):
-      try p99 (~0.010) and p98 (~0.008).
-- [ ] For each candidate, edit `kql/04_update_policy.kql` to update the
-      `THRESHOLD` constant. Push via `tools/02_setup_kql_tables.py`.
-- [ ] Wait 5 min for new ingest, then run
-      `python tools/06_correlate.py --lookback 1h --grace 2m`.
-- [ ] Pick the lowest threshold where Precision still ≥ 95%.
-- [ ] If recall still < 40%, proceed to Phase 2.
+B. **Longer training data.** Currently each per-machine model sees
+   ~420k rows = ~5 days. If recall on slow drifts is the issue,
+   either:
+   - Regenerate training parquet in `notebooks/01_simulator_dev.ipynb`
+     with `DURATION_S = 10 * 24 * 3600`, or
+   - Accept the limit and move on.
 
-## Phase 2 — Longer window + retrain
+C. **Longer window.** Change `WINDOW = 64` to `128` or `256` in
+   `tools/train_per_machine.py`. Slower drifts become visible. Bigger
+   ONNX — verify it still fits the 1 MB Kusto row budget (it will at
+   WINDOW=128; check at WINDOW=256).
 
-- [ ] Regenerate datasets via `notebooks/01_simulator_dev.ipynb`
-      sections 7.1 (training, 10×5d) and 8 (eval, 8 machines).
-      ~10 min on any CPU. Outputs:
-      `data/training/telemetry_wide.parquet`,
-      `data/eval/telemetry_wide.parquet`,
-      `data/eval/anomaly_labels.parquet`.
-- [ ] In `notebooks/06_train_transformer_small.ipynb`:
-      - [ ] Set `WIN = 128` (was 64). Keep `STRIDE = 8` or set to 16 to
-            keep training-set size manageable.
-      - [ ] Re-fit `StandardScaler` on the new wide table.
-      - [ ] Train (12 epochs, batch 256, lr 3e-4). On GPU expect
-            ~5–10 min.
-      - [ ] Verify val loss < 0.008 and PR-AUC ≥ 0.65 on eval set.
-- [ ] Export ONNX with the new `WIN`. Save under
-      `models/transformer_ae_w128/` to keep the old one for rollback.
-- [ ] Update `kql/04_update_policy.kql` so `WIN = 128` and the new
-      threshold are used. Push via `tools/02_setup_kql_tables.py`.
-- [ ] Run `tools/05_register_model.py` to upload the new ONNX into
-      Fabric and switch the active model row.
-- [ ] Re-run `tools/06_correlate.py --lookback 1h --grace 2m`. Target:
-      Recall ≥ 60%, Precision ≥ 95%, median latency ≤ 90 s.
+D. **Per-sensor anomaly subscores.** The score is already
+   `max-over-features(MSE)` so this is already in effect.
 
-## Phase 3 — Per-sensor scoring (only if Phase 2 still falls short)
+## Phase 3 — Demo-ready cleanup (after validation passes)
 
-- [ ] In the model's score function, replace
-      `score = mean((x - x_hat) ** 2)` with
-      `score = max(mean_over_time((x - x_hat) ** 2, axis=time))`
-      (i.e. max across the 8 features instead of mean). This makes a
-      drift on a single sensor not get drowned out.
-- [ ] Recompute threshold (p99.5 on the new score distribution).
-- [ ] Re-export ONNX, push, re-register, re-validate.
+1. Restore production anomaly rate:
+   ```powershell
+   az containerapp update -g rg-fabric-demo -n ca-simulator `
+       --set-env-vars SIM_ANOMALY_PROB=0.0005
+   ```
+2. (Optional) Delete the legacy container app + its ACR:
+   ```powershell
+   az containerapp delete -g fabric-anomaly-detection -n ca-simulator --yes
+   az acr delete -n acrsim3l8kge --yes
+   ```
+3. Commit and push. Suggested message:
+   `feat: per-machine architecture (2 machines, 2 dedicated ONNX models)`
 
-## Phase 4 — Demo cleanup (do last)
+## Phase 4 — Documentation (after Phase 3)
 
-- [ ] Restore `SIM_ANOMALY_PROB=0.0005` on `ca-simulator`.
-- [ ] Wait 1 hour, re-run correlation to confirm metrics under realistic
-      injection density.
-- [ ] Update `.copilot/STATE.md` with final metrics.
-- [ ] Tag the repo (`v1.0-demo`).
+1. Update `README.md` and `docs/architecture.md` with the per-machine
+   topology diagram.
+2. Update `docs/RUNBOOK.md` to reference `tools/train_per_machine.py`
+   and the per-machine model naming convention.
+3. Notebooks `01_simulator_dev.ipynb` and `06_train_transformer_small.ipynb`
+   were intentionally NOT rewritten — they remain valid for offline
+   experimentation but the production path is now the script + KQL.
+   Note this near the top of each notebook.
 
-## Done (carry-over from earlier sessions)
-
-- ✅ Fabric environment bootstrap (workspace, eventhouse, KQL DB,
-  eventstream, dashboard).
-- ✅ Cloud simulator with FSM + load coupling + injection markers.
-- ✅ End-to-end real-time scoring pipeline (raw → wide → scores).
-- ✅ Ground-truth correlation (`kql/05`, `06`, `07`,
-  `tools/06_correlate.py`).
-- ✅ FP/FN classification + Precision/Recall/F1 metrics + dashboard
-  tiles (commit `a15345a`).
+## Known gotchas / non-goals
+- We did NOT regenerate the training parquet. The existing
+  `data/training/telemetry_wide.parquet` (10 machines × 5 days) is
+  filtered per machine at training time. This is intentional: the
+  existing data is fine and regeneration burns ~10 min.
+- We did NOT run the offline eval (`data/eval/*`) because the eval set
+  uses machine IDs `M-101..M-108` that no longer correspond to the
+  production fleet. PR-AUC is no longer computed; we trust live
+  correlation as the operational metric.
+- `.purge` on KQL tables requires Fabric Eventhouse admin
+  authorization that our principal does not have. Old rows for
+  M-003..M-005 will age out naturally with the 30-day softdelete
+  retention. `tools/purge_obsolete_machines.py` exists but currently
+  errors with 403; keep it as a one-shot for the day someone grants
+  admin rights.

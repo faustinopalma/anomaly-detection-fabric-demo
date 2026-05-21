@@ -7,7 +7,7 @@ anomaly, so the producer must be as gap-free as possible).
 
 All knobs are read from environment variables:
 
-  SIM_MACHINES        (default 5)
+  SIM_MACHINES        (default 2)
   SIM_RATE            (default 1.0)        samples/s/sensor
   SIM_ANOMALY_PROB    (default 0.0005)
   SIM_BATCH_SIZE      (default 200)

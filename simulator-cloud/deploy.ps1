@@ -27,7 +27,7 @@ param(
     [string]$EnvName  = "cae-anomalydet",
     [string]$AppName  = "ca-simulator",
     [string]$ImageTag = "latest",
-    [int]   $Machines = 5,
+    [int]   $Machines = 2,
     [double]$Rate     = 1.0,
     [double]$AnomalyProb = 0.0005
 )

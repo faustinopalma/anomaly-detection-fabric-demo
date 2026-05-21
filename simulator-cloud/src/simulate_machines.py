@@ -431,7 +431,7 @@ def run(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--machines", type=int, default=5)
+    p.add_argument("--machines", type=int, default=2)
     p.add_argument("--rate", type=float, default=1.0)
     p.add_argument("--duration", type=float, default=0)
     p.add_argument("--anomaly-prob", type=float, default=0.0)

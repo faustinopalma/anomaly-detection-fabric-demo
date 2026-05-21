@@ -1,0 +1,73 @@
+{
+  "model": "transformer_ae_small__M-001",
+  "machine_id": "M-001",
+  "window": 64,
+  "stride_train": 16,
+  "stride_eval": 1,
+  "n_features": 8,
+  "d_model": 56,
+  "n_heads": 4,
+  "n_enc_layers": 2,
+  "n_dec_layers": 2,
+  "ff_dim": 160,
+  "n_parameters": 161984,
+  "threshold": 1.0067851543426514,
+  "threshold_rule": "p99.5 on training-val window scores",
+  "training": {
+    "epochs": 12,
+    "batch": 256,
+    "lr": 0.0003,
+    "weight_decay": 1e-05,
+    "best_val_loss": 0.12776301188848882,
+    "device": "cuda"
+  },
+  "onnx": {
+    "ir_version": 9,
+    "fp32": {
+      "path": "models\\transformer_ae_small__M-001\\model.onnx",
+      "raw_kb": 808.3,
+      "base64_kb": 1077.8,
+      "kusto_row_fits": false
+    },
+    "fp16": {
+      "path": "models\\transformer_ae_small__M-001\\model.fp16.onnx",
+      "raw_kb": 493.0,
+      "base64_kb": 657.3,
+      "kusto_row_fits": true
+    },
+    "parity_fp16_max_rel_diff": 0.000296062498819083
+  },
+  "scaler": {
+    "sensors": [
+      "vibration_axial",
+      "vibration_radial",
+      "temperature_motor",
+      "temperature_bearing",
+      "pressure_hydraulic",
+      "current",
+      "power",
+      "spindle_rpm"
+    ],
+    "mean": [
+      0.18439191579818726,
+      0.29103052616119385,
+      37.56100082397461,
+      35.098426818847656,
+      112.00383758544922,
+      7.400477409362793,
+      3.2798802852630615,
+      2931.418212890625
+    ],
+    "std": [
+      0.0750284194946289,
+      0.10430437326431274,
+      11.570294380187988,
+      8.105650901794434,
+      15.878349304199219,
+      3.184056520462036,
+      1.4992927312850952,
+      34.89187240600586
+    ]
+  },
+  "kusto_deployable": true
+}

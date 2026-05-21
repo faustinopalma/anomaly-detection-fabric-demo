@@ -1,33 +1,41 @@
 // 04_update_policy.kql
-// Define the on-demand scoring function and attach it as an update policy
-// on the `anomalies` table so that every batch ingested into `raw_telemetry`
-// is automatically scored and anomalous windows are persisted.
+// Per-machine scoring functions + update policy on the `anomalies` table.
+//
+// Production realism: one model per machine.
+//   M-001 -> transformer_ae_small__M-001 (threshold from its own metadata)
+//   M-002 -> transformer_ae_small__M-002 (threshold from its own metadata)
+//
+// Each batch ingested into `raw_telemetry` triggers BOTH scoring functions;
+// each function filters to its own machine, so cross-machine work is cheap.
 //
 // PREREQUISITE
-//   The source table (`raw_telemetry`) MUST be on queued ingestion, NOT
-//   streaming. The python() plugin is not allowed in update policies whose
-//   source table uses streaming ingestion. The streaming-disable command
-//   is in 01_tables.kql; the batching policy there controls how often
-//   this update policy fires (default: ~1 min batches).
-//   See docs/concepts.md §6 and §9.
+//   The source table (`raw_telemetry`) MUST be on queued ingestion. The
+//   python() plugin is not allowed in update policies whose source table
+//   uses streaming ingestion (see kql/01_tables.kql + docs/concepts.md §6).
 //
-// IMPORTANT
-//   * `machine` / `sensor` / threshold values below are demo defaults.
-//     For production you'll usually loop machines from a separate function
-//     or pre-create a (machine, sensor, model) routing table.
-//   * We call score_univariate_onnx_BATCH (not _lookback). The _batch
-//     variant is the only one safe inside an update policy: it scores
-//     each window exactly once across the lifetime of the pipeline.
-//     See kql/03_scoring_functions.kql header for the full rationale.
+// We call score_multivariate_onnx_BATCH (not _lookback). The _batch variant
+// is the only one safe inside an update policy: it scores each window
+// exactly once across the lifetime of the pipeline. The function reads
+// the scaler from the model's metadata and normalises sensors before
+// invoking the ONNX session, so thresholds are computed on the same
+// distribution as training (see kql/03_scoring_functions.kql).
+
+// Drop legacy single-machine functions (replaced by per-machine ones below).
+// `ifexists` makes this safe on a fresh DB where they were never created.
+.drop function fn_score_demo ifexists
+
+.drop function fn_score_multivariate_demo ifexists
 
 .create-or-alter function with (folder='scoring',
-        docstring='Scoring entry point: score the new-batch multivariate windows for a fixed machine using the small Transformer AE')
-    fn_score_demo() {
+        docstring='Score new-batch multivariate windows for M-001 using its dedicated Transformer AE')
+    fn_score_demo_M001() {
+    let m         = latest_model('transformer_ae_small__M-001');
+    let threshold = todouble(toscalar(m | project todouble(metadata.threshold)));
     score_multivariate_onnx_batch(
-        model_name = 'transformer_ae_small',
+        model_name = 'transformer_ae_small__M-001',
         machine    = 'M-001',
         bin        = 1s,
-        threshold  = 0.0154  // p99.5 on training-val window scores (see notebook 06 metadata)
+        threshold  = threshold
     )
     | where is_anomaly
     | project
@@ -39,11 +47,37 @@
         payload = bag_pack('model', model_name, 'version', model_version)
 }
 
-// Attach the function to `anomalies` as an update policy. Every batch
-// ingested into `raw_telemetry` triggers `fn_score_demo()`; only rows where
+.create-or-alter function with (folder='scoring',
+        docstring='Score new-batch multivariate windows for M-002 using its dedicated Transformer AE')
+    fn_score_demo_M002() {
+    let m         = latest_model('transformer_ae_small__M-002');
+    let threshold = todouble(toscalar(m | project todouble(metadata.threshold)));
+    score_multivariate_onnx_batch(
+        model_name = 'transformer_ae_small__M-002',
+        machine    = 'M-002',
+        bin        = 1s,
+        threshold  = threshold
+    )
+    | where is_anomaly
+    | project
+        detected_at, machine_id,
+        sensor_id    = '',
+        window_start, window_end,
+        model_name, model_version,
+        score, is_anomaly,
+        payload = bag_pack('model', model_name, 'version', model_version)
+}
+
+// Attach both per-machine functions to `anomalies` as update policies.
+// Each ingest batch into `raw_telemetry` triggers BOTH; only rows where
 // `is_anomaly` is true land in `anomalies`.
 //   * IsTransactional=false -> if scoring fails, raw rows are still kept.
 //   * PropagateIngestionProperties=false -> we don't need extent tags.
+//
+// NOTE: this replaces the legacy single-machine `fn_score_demo()` and the
+// MV-based `fn_score_multivariate_demo()` from kql/05_multivariate_mv.kql.
+// The materialised view raw_telemetry_wide_mv is still defined in 05 (it's
+// useful for ad-hoc queries) but is no longer wired into the update policy.
 
 .alter table anomalies policy update
 ```
@@ -51,7 +85,14 @@
   {
     "IsEnabled": true,
     "Source": "raw_telemetry",
-    "Query": "fn_score_demo()",
+    "Query": "fn_score_demo_M001()",
+    "IsTransactional": false,
+    "PropagateIngestionProperties": false
+  },
+  {
+    "IsEnabled": true,
+    "Source": "raw_telemetry",
+    "Query": "fn_score_demo_M002()",
     "IsTransactional": false,
     "PropagateIngestionProperties": false
   }
