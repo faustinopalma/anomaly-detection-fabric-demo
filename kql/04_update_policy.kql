@@ -21,22 +21,22 @@
 //     See kql/03_scoring_functions.kql header for the full rationale.
 
 .create-or-alter function with (folder='scoring',
-        docstring='Scoring entry point: score the new-batch windows for a fixed (machine, sensor)')
+        docstring='Scoring entry point: score the new-batch multivariate windows for a fixed machine using the small Transformer AE')
     fn_score_demo() {
-    score_univariate_onnx_batch(
-        model_name = 'univariate_ae__temperature_motor',
+    score_multivariate_onnx_batch(
+        model_name = 'transformer_ae_small',
         machine    = 'M-001',
-        sensor     = 'temperature_motor',
-        window_size= 64,
-        threshold  = 3870.0  // ~p95 of recent reconstruction errors (calibrate per machine)
+        bin        = 1s,
+        threshold  = 0.0154  // p99.5 on training-val window scores (see notebook 06 metadata)
     )
     | where is_anomaly
     | project
-        detected_at, machine_id, sensor_id,
+        detected_at, machine_id,
+        sensor_id    = '',           // multivariate score: not tied to a single sensor
         window_start, window_end,
         model_name, model_version,
         score, is_anomaly,
-        payload = bag_pack('values', values)
+        payload = bag_pack('model', model_name, 'version', model_version)
 }
 
 // Attach the function to `anomalies` as an update policy. Every batch

@@ -1,0 +1,114 @@
+// 07_classification.kql
+// TP / FP / FN classification + precision / recall / F1.
+//
+// Definitions (a detection = a row in `anomalies` with is_anomaly == true):
+//   - TP detection : its (machine_id, detected_at) falls inside any injection
+//                    window [start_ts .. expected_end_ts + match_grace].
+//   - FP detection : it does NOT fall inside any injection window.
+//   - TP injection : at least one detection fell inside its window.
+//   - FN injection : no detection fell inside its window.
+//
+// Note: TP_det >= TP_inj (one injection can match many detections).
+// Precision is computed from detection-side counts, Recall from
+// injection-side counts.
+
+.create-or-alter function with (folder='analytics',
+        docstring='Label every detection as TP or FP given ground-truth injections')
+    fn_classify_detections(match_grace:timespan=2m, lookback:timespan=2h) {
+    let inj = injected_anomalies
+        | where start_ts > ago(lookback)
+        | extend match_until = expected_end_ts + match_grace
+        | project inj_start = start_ts, inj_end = match_until,
+                  inj_machine = machine_id,
+                  anomaly_kind, sensor_target, duration_s;
+    anomalies
+    | where detected_at > ago(lookback)
+    | where is_anomaly == true
+    | project detected_at, machine_id, score, model_name
+    | join kind=leftouter inj on $left.machine_id == $right.inj_machine
+    | where isnull(inj_start) or (detected_at between (inj_start .. inj_end))
+    | summarize
+        matched_inj   = countif(isnotnull(inj_start)),
+        anomaly_kind  = take_any(anomaly_kind),
+        sensor_target = take_any(sensor_target),
+        inj_start     = min(inj_start)
+        by detected_at, machine_id, score, model_name
+    | extend label = iff(matched_inj > 0, 'TP', 'FP')
+    | project detected_at, machine_id, score, model_name,
+              label, anomaly_kind, sensor_target, inj_start
+    | order by detected_at desc
+}
+
+.create-or-alter function with (folder='analytics',
+        docstring='Label every injection as TP or FN given model detections')
+    fn_classify_injections(match_grace:timespan=2m, lookback:timespan=2h) {
+    let dets = anomalies
+        | where detected_at > ago(lookback)
+        | where is_anomaly == true
+        | project detected_at, det_machine = machine_id, det_score = score;
+    injected_anomalies
+    | where start_ts > ago(lookback)
+    | extend match_until = expected_end_ts + match_grace
+    | join kind=leftouter dets on $left.machine_id == $right.det_machine
+    | where isnull(detected_at) or (detected_at between (start_ts .. match_until))
+    | summarize
+        first_det_at = min(detected_at),
+        best_score   = max(det_score),
+        det_count    = countif(isnotnull(detected_at))
+        by start_ts, machine_id, anomaly_kind, sensor_target,
+           duration_s, expected_end_ts
+    | extend
+        label     = iff(det_count > 0, 'TP', 'FN'),
+        latency_s = iff(isnotnull(first_det_at),
+                        todouble(datetime_diff('millisecond', first_det_at, start_ts)) / 1000.0,
+                        real(null))
+    | project start_ts, machine_id, anomaly_kind, sensor_target,
+              duration_s, label, latency_s, det_count, best_score, expected_end_ts
+    | order by start_ts desc
+}
+
+.create-or-alter function with (folder='analytics',
+        docstring='Precision / Recall / F1 over a lookback window')
+    fn_correlation_metrics(match_grace:timespan=2m, lookback:timespan=2h) {
+    let det_stats = fn_classify_detections(match_grace, lookback)
+        | summarize TP_det = countif(label == 'TP'), FP = countif(label == 'FP');
+    let inj_stats = fn_classify_injections(match_grace, lookback)
+        | summarize TP_inj = countif(label == 'TP'), FN = countif(label == 'FN'),
+                    median_latency_s = percentile(latency_s, 50),
+                    p90_latency_s    = percentile(latency_s, 90);
+    det_stats
+    | extend _k = 1
+    | join kind=fullouter (inj_stats | extend _k = 1) on _k
+    | extend
+        precision = iff((TP_det + FP) > 0,
+                        round(100.0 * todouble(TP_det) / todouble(TP_det + FP), 1),
+                        real(null)),
+        recall    = iff((TP_inj + FN) > 0,
+                        round(100.0 * todouble(TP_inj) / todouble(TP_inj + FN), 1),
+                        real(null))
+    | extend
+        f1 = iff(isnotnull(precision) and isnotnull(recall) and (precision + recall) > 0,
+                 round(2.0 * precision * recall / (precision + recall), 1),
+                 real(null))
+    | project
+        ['TP (matched detections)']  = TP_det,
+        ['FP (spurious detections)'] = FP,
+        ['TP (matched injections)']  = TP_inj,
+        ['FN (missed injections)']   = FN,
+        ['Precision %']              = precision,
+        ['Recall %']                 = recall,
+        ['F1 %']                     = f1,
+        ['Median latency s']         = round(median_latency_s, 2),
+        ['P90 latency s']            = round(p90_latency_s, 2)
+}
+
+.create-or-alter function with (folder='analytics',
+        docstring='Detection rate breakdown: TP/FP per minute and per machine')
+    fn_classification_breakdown(match_grace:timespan=2m, lookback:timespan=2h, bin_size:timespan=1m) {
+    fn_classify_detections(match_grace, lookback)
+    | summarize
+        TP = countif(label == 'TP'),
+        FP = countif(label == 'FP')
+        by bin(detected_at, bin_size), machine_id
+    | order by detected_at asc
+}

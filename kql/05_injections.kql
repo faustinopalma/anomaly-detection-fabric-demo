@@ -1,0 +1,65 @@
+// 05_injections.kql
+// Ground-truth anomaly injections emitted by the simulator.
+//
+// The simulator (see simulator-cloud/src/simulate_machines.py) sends a
+// marker event whenever it starts an overlay (spike/drift/stuck) on a
+// (machine, sensor). The marker is encoded as a fake telemetry row with:
+//   sensor_id = "__inject__<kind>:<sensor>"
+//   value     = duration in seconds
+//   quality   = -1.0
+// We fan these markers out into a dedicated table via an update policy on
+// raw_telemetry, so dashboards and correlation tools can join "ground truth"
+// with the model's detections (anomalies table).
+
+// ---------------------------------------------------------------------------
+// Table: one row per injection start.
+// ---------------------------------------------------------------------------
+.create-merge table injected_anomalies (
+    start_ts        : datetime,
+    machine_id      : string,
+    anomaly_kind    : string,
+    sensor_target   : string,
+    duration_s      : real,
+    expected_end_ts : datetime,
+    ingest_ts       : datetime
+)
+
+.alter-merge table injected_anomalies policy retention softdelete = 30d
+
+.alter table injected_anomalies policy streamingingestion '{"IsEnabled": false}'
+
+// ---------------------------------------------------------------------------
+// Parsing function: pulls injection rows out of raw_telemetry and turns them
+// into the injected_anomalies shape. Used by the update policy.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='ingest',
+        docstring='Extract ground-truth injection markers from raw_telemetry')
+    fn_extract_injections() {
+    raw_telemetry
+    | where sensor_id startswith "__inject__"
+    | extend parts = split(substring(sensor_id, strlen("__inject__")), ":")
+    | extend anomaly_kind = tostring(parts[0]),
+             sensor_target = tostring(parts[1]),
+             duration_s = todouble(value)
+    | project
+        start_ts        = ts,
+        machine_id,
+        anomaly_kind,
+        sensor_target,
+        duration_s,
+        expected_end_ts = ts + 1s * duration_s,
+        ingest_ts       = ingest_ts
+}
+
+.alter table injected_anomalies policy update
+'[ { "Source": "raw_telemetry", "Query": "fn_extract_injections()", "IsEnabled": true, "IsTransactional": false } ]'
+
+// ---------------------------------------------------------------------------
+// Helper view: telemetry without the marker rows, for charts / scoring.
+// ---------------------------------------------------------------------------
+.create-or-alter function with (folder='ingest',
+        docstring='raw_telemetry filtered of ground-truth injection markers')
+    telemetry_clean() {
+    raw_telemetry
+    | where not(sensor_id startswith "__inject__")
+}

@@ -1,0 +1,47 @@
+// 06_correlation.kql
+// Ground-truth correlation: join injected_anomalies (what the simulator
+// actually faked) with anomalies (what the model detected). For each
+// injection we compute hit/miss and detection latency.
+
+.create-or-alter function with (folder='analytics',
+        docstring='Correlate ground-truth injections with model detections')
+    fn_correlate_injections(match_grace:timespan=2m, lookback:timespan=2h) {
+    let dets = anomalies
+        | where detected_at > ago(lookback)
+        | where is_anomaly == true
+        | project det_at = detected_at, det_machine = machine_id,
+                  det_score = score, det_model = model_name;
+    injected_anomalies
+    | where start_ts > ago(lookback)
+    | extend match_until = expected_end_ts + match_grace
+    | join kind=leftouter dets on $left.machine_id == $right.det_machine
+    | where isnull(det_at) or (det_at between (start_ts .. match_until))
+    | summarize
+        first_det_at  = min(det_at),
+        best_score    = max(det_score),
+        det_count     = countif(isnotnull(det_at))
+        by start_ts, machine_id, anomaly_kind, sensor_target,
+           duration_s, expected_end_ts
+    | extend
+        hit         = det_count > 0,
+        latency_s   = iff(isnotnull(first_det_at),
+                          todouble(datetime_diff('millisecond', first_det_at, start_ts)) / 1000.0,
+                          real(null))
+    | project start_ts, machine_id, anomaly_kind, sensor_target,
+              duration_s, hit, latency_s, det_count, best_score,
+              expected_end_ts, first_det_at
+    | order by start_ts desc
+}
+
+.create-or-alter function with (folder='analytics',
+        docstring='Aggregate correlation KPIs over a lookback window')
+    fn_correlation_kpis(match_grace:timespan=2m, lookback:timespan=2h) {
+    fn_correlate_injections(match_grace, lookback)
+    | summarize
+        ['Injections']      = count(),
+        ['Detected (hits)'] = countif(hit),
+        ['Missed']          = countif(not(hit)),
+        ['Recall %']        = round(100.0 * todouble(countif(hit)) / todouble(count()), 1),
+        ['Median latency s']= round(percentile(latency_s, 50), 2),
+        ['P90 latency s']   = round(percentile(latency_s, 90), 2)
+}

@@ -46,3 +46,7 @@ data/training/telemetry_wide.parquet
 data/eval/raw_telemetry.parquet
 data/eval/telemetry_wide.parquet
 
+
+# Local scratch / dumps
+_*.txt
+
