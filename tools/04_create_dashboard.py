@@ -110,6 +110,44 @@ raw_telemetry
 
 
 # ---------------------------------------------------------------------------
+# CNC (M-003) sensor tiles — the CNC machine has its own 3-sensor set
+# (mandrino_load %, mandrino_power kW, mandrino_torque N*cm) that is not
+# covered by the synthetic-machine charts above.
+# ---------------------------------------------------------------------------
+
+Q_CNC_LOAD = """\
+raw_telemetry
+| where ts between (_startTime .. _endTime)
+| where sensor_id == 'mandrino_load'
+| where isempty(['_machine']) or machine_id == ['_machine']
+| summarize avg_value = avg(value) by machine_id, bin(ts, 10s)
+| order by ts asc
+| render timechart with (ytitle='Spindle load [%]')
+"""
+
+Q_CNC_POWER = """\
+raw_telemetry
+| where ts between (_startTime .. _endTime)
+| where sensor_id == 'mandrino_power'
+| where isempty(['_machine']) or machine_id == ['_machine']
+| summarize avg_value = avg(value) by machine_id, bin(ts, 10s)
+| order by ts asc
+| render timechart with (ytitle='Spindle power [kW]')
+"""
+
+Q_CNC_TORQUE = """\
+raw_telemetry
+| where ts between (_startTime .. _endTime)
+| where sensor_id == 'mandrino_torque'
+| where isempty(['_machine']) or machine_id == ['_machine']
+| summarize avg_value = avg(value) by machine_id, bin(ts, 10s)
+| order by ts asc
+| render timechart with (ytitle='Spindle torque [N*cm]')
+"""
+
+
+
+# ---------------------------------------------------------------------------
 # Ground-truth correlation tiles
 # ---------------------------------------------------------------------------
 
@@ -298,6 +336,13 @@ def build_dashboard(workspace_id: str, database_id: str, cluster_uri: str, datab
         tile("False positives (spurious detections)",
              "Detections outside any injection window",
              0, 52, 24, 7, "table", Q_FP_TABLE, table_opts),
+        # --- CNC (M-003) sensor charts: only machines with these sensors show ---
+        tile("Spindle load [%] (CNC)", "mandrino_load — avg per machine, 10s bins",
+             0, 59, 8, 7, "line", Q_CNC_LOAD, line_opts),
+        tile("Spindle power [kW] (CNC)", "mandrino_power — avg per machine, 10s bins",
+             8, 59, 8, 7, "line", Q_CNC_POWER, line_opts),
+        tile("Spindle torque [N*cm] (CNC)", "mandrino_torque — avg per machine, 10s bins",
+             16, 59, 8, 7, "line", Q_CNC_TORQUE, line_opts),
     ]
     tiles = [t for t, _q in tiles_and_queries]
     queries = [q for _t, q in tiles_and_queries]
