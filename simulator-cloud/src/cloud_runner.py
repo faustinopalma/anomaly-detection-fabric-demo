@@ -15,6 +15,13 @@ All knobs are read from environment variables:
                                            the last machine is the CNC engine
   SIM_QUIET           (default unset)      set to "1" to suppress per-tick logs
 
+Optional operator control plane (Static Web App backend):
+
+  SIM_CONTROL_ENABLED      set to "1" to start the FastAPI control server
+  SIM_CONTROL_PORT         (default 8080)
+  SIM_CONTROL_API_KEY      shared secret required in the X-API-Key header
+  SIM_CONTROL_CORS_ORIGINS (optional) comma-separated allowed origins
+
 EVENTSTREAM_CONNECTION_STRING must be present in env (injected by ACA
 secret reference at deploy time).
 """
@@ -28,6 +35,42 @@ import time
 import traceback
 
 import simulate_machines
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes")
+
+
+def _maybe_start_control():
+    """Create a shared ControlState and start the control API thread when
+    SIM_CONTROL_ENABLED is set. Returns the ControlState (or None)."""
+    if not _truthy(os.environ.get("SIM_CONTROL_ENABLED")):
+        return None
+
+    api_key = os.environ.get("SIM_CONTROL_API_KEY", "").strip()
+    if not api_key:
+        print("[cloud_runner] SIM_CONTROL_ENABLED set but SIM_CONTROL_API_KEY "
+              "is empty — control plane disabled", flush=True)
+        return None
+
+    from control import ControlState
+    import server
+
+    try:
+        default_prob = float(os.environ.get("SIM_ANOMALY_PROB", "0.0005"))
+    except ValueError:
+        default_prob = 0.0005
+
+    control = ControlState(default_anomaly_prob=default_prob)
+    port = int(os.environ.get("SIM_CONTROL_PORT", "8080"))
+    server.serve_in_thread(
+        control,
+        api_key,
+        port=port,
+        cors_origins=server.cors_origins_from_env(),
+    )
+    print(f"[cloud_runner] control API listening on :{port}", flush=True)
+    return control
 
 
 def _argv_from_env() -> list[str]:
@@ -48,11 +91,12 @@ def _argv_from_env() -> list[str]:
 
 
 def main() -> int:
+    control = _maybe_start_control()
     backoff = 5.0
     while True:
         try:
             print("[cloud_runner] starting simulator", flush=True)
-            simulate_machines.main(_argv_from_env())
+            simulate_machines.main(_argv_from_env(), control=control)
             # main() returns only if --duration > 0 (we pass 0) or on
             # graceful shutdown. Treat any return as a transient hiccup
             # and restart.
