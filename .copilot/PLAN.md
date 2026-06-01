@@ -1,6 +1,48 @@
 # Plan
 
-_Last updated: 2026-06-01 (M-003 real-data CNC machine added and validated)_
+_Last updated: 2026-06-02 (Task A docs/dashboard refresh done; Task B SWA in progress)_
+
+## IN PROGRESS — Task B: Static Web App control panel for the simulator
+
+Goal (user request): add a Static Web App connected to the cloud simulator
+container. The SWA shows each simulated machine's **state** (simple, not
+choreographic), lets the operator **toggle per-machine random-anomaly mode**,
+and when random mode is OFF lets them **inject anomalies manually**. The SWA
+sends commands to the container; if the container is down (stopped to save
+cost) the SWA shows it and stays inactive.
+
+Architecture decision: the container today is a one-way producer (no inbound
+API). Add a small **FastAPI control server** inside the simulator process
+(background thread) exposing a read-only state snapshot + control endpoints,
+secured with an `X-API-Key` header. A static (no-build) HTML/JS front-end
+hosted on Azure Static Web Apps (free tier) polls `/api/state` and POSTs
+control commands.
+
+Committable sub-steps (each tested + committed):
+1. `control.py` — thread-safe `ControlState` (per-machine random flag +
+   effective prob, manual-injection queue, status snapshot). Unit-testable.
+2. Thread `ControlState` through `run()`/`main()` so the loop honours
+   per-machine random toggles and pops manual injections. Behaviour
+   unchanged when control is absent (back-compat). Local test.
+3. `server.py` — FastAPI app factory (`/healthz`, `GET /api/state`,
+   `POST /api/machines/{id}/random`, `POST /api/machines/{id}/inject`),
+   API-key auth + CORS. Start from `cloud_runner` when
+   `SIM_CONTROL_ENABLED=1` (`SIM_CONTROL_PORT`, `SIM_CONTROL_API_KEY`).
+4. `webapp/` static front-end (state cards + per-machine controls,
+   container-offline banner). Machine-count-agnostic.
+5. `infra/swa.bicep` for Azure Static Web Apps (free) + notes to enable ACA
+   ingress on the control port. Validate with `bicep build`.
+6. Local end-to-end test (run simulator+API locally with a fake/no Event Hub,
+   point the webapp at localhost). Provide deploy scripts but DO NOT trigger
+   paid cloud changes unattended.
+
+Constraints: secrets only in `.env` (`.env.example` is the contract);
+`SIM_CONTROL_API_KEY` added there. Live container ingress change is a manual
+step left for the user (never modify live infra unattended).
+
+---
+
+_Earlier: 2026-06-01 (M-003 real-data CNC machine added and validated)_
 
 ## DONE — 3rd machine (M-003, real-data CNC)
 
