@@ -1,13 +1,30 @@
 # tools/
 
 Python scripts for Fabric-side provisioning (Eventstream source/destination
-creation, `.kql` execution). The simulator itself has been moved into two
-dedicated folders:
+creation, `.kql` execution, model registration, dashboard build,
+injection↔detection correlation). The simulator itself has been moved into
+two dedicated folders:
 
 - [`../simulator-local`](../simulator-local) — local dev/debug runs
 - [`../simulator-cloud`](../simulator-cloud) — always-on deployment on Azure Container Apps
 
-## Telemetry simulator (legacy section, now in `simulator-local/`)
+## Provisioning & ops scripts
+
+Run each with the venv interpreter, e.g.
+`.\.venv\Scripts\python.exe tools/04_create_dashboard.py`.
+
+| Script | What it does |
+|---|---|
+| `01_setup_eventstream_source.py` | Create the Custom App source on `es_machines`. |
+| `02_setup_kql_tables.py <file.kql ...>` | Apply one or more `kql/*.kql` scripts to the KQL DB. |
+| `03_setup_eventstream_destination.py` | Wire the Eventhouse destination (and auto-resume if Paused via `_check_topology.py`). |
+| `04_create_dashboard.py` | Build/update the Real-Time Dashboard `rtd_telemetry_live` (idempotent). |
+| `05_register_model.py models/<dir>` | Register an ONNX model (+scaler+threshold) into the `models` table. |
+| `06_correlate.py --lookback 30m` | Correlate injected anomalies vs detections; reports precision/recall/F1. |
+| `train_per_machine.py` | Train one model per machine from the training parquet. |
+| `inject_anomaly.py` | Inject a labelled anomaly (spike/drift/stuck) for end-to-end validation. |
+
+## Telemetry simulator (now in `simulator-local/`)
 
 `simulate_machines.py` sends synthetic measurements in real time from N
 industrial machines (CNC / press / motors) to the Fabric Eventstream
@@ -47,8 +64,12 @@ pip install -r simulator-local/requirements.txt
 ## 3. Run
 
 ```pwsh
-# Default: 5 machines, 1 sample/sec per sensor, infinite (Ctrl-C to stop)
+# Default: 2 synthetic machines (M-001/M-002), 1 sample/sec per sensor,
+# infinite (Ctrl-C to stop)
 python simulator-local/simulate_machines.py
+
+# Reproduce the live cloud fleet: 3 machines, last one (M-003) driven by the CNC profile
+python simulator-local/simulate_machines.py --machines 3 --cnc-profile data/cnc_profile_M-003.json
 
 # 10 machines, 5 samples/sec/sensor, 2 minutes, more frequent anomalies
 python simulator-local/simulate_machines.py --machines 10 --rate 5 --duration 120 --anomaly-prob 0.002

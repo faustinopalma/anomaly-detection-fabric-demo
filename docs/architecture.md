@@ -302,13 +302,23 @@ operational constraints to keep in mind:
 
 ## 6. Roadmap (not implemented yet)
 
-- Per-(machine, sensor) routing table to drive both update policies at
-  scale (today the demo hard-codes `M-001` + `temperature_motor`).
+- Per-(machine, sensor) routing table to drive the update policy at
+  scale (today the live demo uses one dedicated `fn_score_demo_<MID>()`
+  function per machine — see §2b).
 - A/B comparison between models via `version` parameter.
-- Real-time dashboard built on top of the KQL database (Semantic Model and
-  Report items are provisioned blank).
 - Quality-flag handling (`quality < 192`) for sensor dropouts.
 - Move the `%pip install` cell out of notebooks 04/05 and into a published
   `env_anomaly` Fabric Environment.
 - Promote the multivariate dedup from a single anchor sensor to a small
   helper function that picks the densest sensor per (machine, batch).
+
+### Implemented since the original roadmap
+
+- **Real-time dashboard** `rtd_telemetry_live` — a Fabric KQLDashboard
+  built and updated idempotently by
+  [`tools/04_create_dashboard.py`](../tools/04_create_dashboard.py). It is
+  machine-agnostic (KPIs, per-machine line charts, latest-readings table,
+  z-score anomalies, and the injection↔detection correlation tiles) and
+  auto-discovers machines via a dynamic `_machine` dropdown.
+- **Per-machine scoring** — the old single hard-coded `M-001` path was
+  replaced by `fn_score_demo_M001/M002/M003()` (§2b).

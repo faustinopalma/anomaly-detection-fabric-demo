@@ -1,5 +1,12 @@
 # Model architecture options for anomaly detection
 
+> **Status (current):** the live demo converged on the small **TransformerAE**
+> (`transformer_ae_small`, WINDOW=64), trained **per machine** — one model,
+> scaler and threshold each — for the 3 live machines (M-001/M-002 synthetic
+> 8-sensor, M-003 CNC 3-sensor). The options below are the design menu that
+> led to that choice; the dataset notes (`M-001..M-005`, 5 machines) describe
+> the original offline training set, not the current live fleet.
+>
 > Companion to [`.copilot/PLAN.md`](../.copilot/PLAN.md) — Phase 4.
 > Goal: pick the model we'll train on `data/training/telemetry_wide.parquet`
 > (clean) and evaluate against `data/eval/telemetry_wide.parquet` +

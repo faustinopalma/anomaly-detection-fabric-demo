@@ -7,7 +7,30 @@ demo** using the **Fabric CLI** (`fab`) driven from PowerShell with
 The demo ingests time-series telemetry from multiple machines (each with
 multiple sensors), trains a window-based model offline, exports it to
 **ONNX**, and scores it **inside the Fabric KQL database** via the
-`python()` plugin — no external Spark/AKS cluster required.
+`python()` plugin — no external Spark/AKS cluster required. Detections and
+live telemetry are surfaced on a Fabric **Real-Time Dashboard**
+(`rtd_telemetry_live`).
+
+## Current live architecture (3 machines)
+
+The demo has converged on a **production-realistic, per-machine** shape:
+one dedicated ONNX model per machine, each with its own scaler and
+threshold (read from the model's `metadata.threshold`) — no single
+hard-coded `machine=` filter in the scoring path.
+
+| Machine | Model | Sensors | Data source |
+|---|---|---|---|
+| M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | simulator physics |
+| M-002 | `transformer_ae_small__M-002` | 8 (synthetic) | simulator physics |
+| M-003 | `transformer_ae_small__M-003` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | recorded real CNC profile |
+
+Live pipeline: **always-on cloud simulator** (Azure Container App,
+`SIM_MACHINES=3`) → Eventstream `es_machines` → KQL `raw_telemetry` →
+per-machine update-policy functions `fn_score_demo_M001/M002/M003` →
+`anomalies` → Real-Time Dashboard `rtd_telemetry_live`.
+
+> `models/transformer_ae_small__M-004/` is a trained **benchmark** model
+> (cloud-vs-local comparison) and is **not** wired into the live fleet.
 
 ## Documentation
 
@@ -20,7 +43,10 @@ Read in this order, depending on what you want:
 | [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
 | [`docs/anomaly_detection_fabric_kql.md`](docs/anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
 | [`docs/data_modeling_industrial_measures.md`](docs/data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
-| [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream and run KQL scripts. |
+| [`docs/model_architecture_options.md`](docs/model_architecture_options.md) | Model-family options (AE variants) and the tradeoffs behind the chosen TransformerAE. |
+| [`docs/model_deployment_options.md`](docs/model_deployment_options.md) | Where/how to run the ONNX model (in-KQL, Spark, local) and the deployment tradeoffs. |
+| [`docs/cloud_vs_local_training_comparison.md`](docs/cloud_vs_local_training_comparison.md) | Azure ML GPU vs local CPU training benchmark (M-004). |
+| [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream, run KQL scripts, register models, build the dashboard. |
 
 ## Prerequisites
 
@@ -65,24 +91,39 @@ silent until it expires.
 │   ├── concepts.md                              # plain-English tour — start here
 │   ├── architecture.md                          # deployed items + post-deploy steps
 │   ├── anomaly_detection_fabric_kql.md          # KQL cookbook (every option, with code)
-│   └── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
+│   ├── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
+│   ├── model_architecture_options.md            # AE model-family options + tradeoffs
+│   ├── model_deployment_options.md              # where/how to run the ONNX model
+│   ├── cloud_vs_local_training_comparison.md    # Azure ML GPU vs local CPU benchmark
+│   └── RUNBOOK.md                               # fresh-machine recipe
 ├── kql/
 │   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy, streaming OFF
 │   ├── 02_models.kql                     # versioned ONNX model registry
 │   ├── 03_scoring_functions.kql          # univariate + multivariate window builders, python(onnx) scorers
-│   ├── 04_update_policy.kql              # auto-score on ingest (univariate)
-│   └── 05_multivariate_mv.kql            # wide materialized view + multivariate scoring + 2nd update policy
+│   ├── 04_update_policy.kql              # per-machine auto-score on ingest (fn_score_demo_M001/M002/M003)
+│   ├── 05_multivariate_mv.kql            # wide materialized view + multivariate scoring helpers
+│   ├── 05_injections.kql                 # injected_anomalies ground-truth table
+│   ├── 06_correlation.kql                # injection↔detection correlation functions
+│   └── 07_classification.kql             # TP/FP/FN classification functions
 ├── items/                                # blank scaffold, kept for the only legacy notebook still in use
 │   └── nb_register_kql_scorer.Notebook/      # re-applies kql/*.kql
 ├── notebooks/                            # active notebooks (publish via tools/upload_notebook.py)
 │   ├── 01_simulator_dev.ipynb            # physics simulator + offline dataset builder (data/training, data/eval)
 │   ├── 02_train_univariate_ae.ipynb      # per-sensor LSTM AE → univariate_ae__<sensor_id>
-│   └── 03_train_multivariate_ae.ipynb    # per-machine LSTM AE over wide MV → multivariate_ae__<machine_id>
-├── tools/                                # Python helpers (Eventstream wiring, KQL setup, anomaly inject, notebook publish)
+│   ├── 03_train_multivariate_ae.ipynb    # per-machine LSTM AE over wide MV → multivariate_ae__<machine_id>
+│   ├── 04_train_transformer_ae.ipynb     # TransformerAE variant
+│   ├── 05_train_conv_gru_ae.ipynb        # Conv+GRU AE variant
+│   ├── 06_train_transformer_small.ipynb  # small TransformerAE (the live per-machine model)
+│   ├── 07_explore_telemetry.ipynb        # ad-hoc telemetry exploration
+│   ├── 08_simulator_cnc_dev.ipynb        # CNC (M-003) profile + engine development
+│   └── 09_cloud_train_aml.ipynb          # submit Azure ML cloud training jobs
+├── tools/                                # Python helpers (Eventstream wiring, KQL setup, model register, dashboard, anomaly inject, correlate)
 ├── simulator-local/                      # run the simulator locally
 ├── simulator-cloud/                      # always-on simulator on Azure Container Apps
+├── cloud-training/                       # Azure ML job: generate synthetic data + train + export ONNX
 ├── infra/
-│   └── fabric-capacity.bicep             # Bicep template for a Microsoft.Fabric/capacities resource
+│   ├── fabric-capacity.bicep             # Bicep template for a Microsoft.Fabric/capacities resource
+│   └── ml-workspace.bicep                # Bicep template for the Azure ML training workspace
 └── scripts/
     ├── create-capacity.ps1               # one-shot: create the Fabric capacity (uses infra/fabric-capacity.bicep)
     ├── deploy.ps1                        # main entrypoint: workspace + items on an existing capacity
