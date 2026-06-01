@@ -1,0 +1,64 @@
+{
+  "model": "transformer_ae_small__M-003",
+  "machine_id": "M-003",
+  "window": 64,
+  "stride_train": 16,
+  "stride_eval": 1,
+  "n_features": 3,
+  "d_model": 56,
+  "n_heads": 4,
+  "n_enc_layers": 2,
+  "n_dec_layers": 2,
+  "ff_dim": 160,
+  "n_parameters": 161419,
+  "threshold": 1.8816989660263062,
+  "threshold_rule": "p99.5 on training-val window scores",
+  "data_source": "real_cnc_profile (data/cnc_profile_M-003.json)",
+  "units": {
+    "mandrino_load": "%",
+    "mandrino_power": "kW",
+    "mandrino_torque": "N*cm"
+  },
+  "training": {
+    "epochs": 16,
+    "batch": 256,
+    "lr": 0.0003,
+    "weight_decay": 1e-05,
+    "best_val_loss": 1.0329431779355283,
+    "device": "cpu"
+  },
+  "onnx": {
+    "ir_version": 9,
+    "fp32": {
+      "path": "model.onnx",
+      "raw_kb": 806.1,
+      "base64_kb": 1074.8,
+      "kusto_row_fits": false
+    },
+    "fp16": {
+      "path": "model.fp16.onnx",
+      "raw_kb": 491.9,
+      "base64_kb": 655.8,
+      "kusto_row_fits": true
+    },
+    "parity_fp16_max_rel_diff": 3.376076710992493e-05
+  },
+  "scaler": {
+    "sensors": [
+      "mandrino_load",
+      "mandrino_power",
+      "mandrino_torque"
+    ],
+    "mean": [
+      9.071867942810059,
+      6.596578598022461,
+      2429.75537109375
+    ],
+    "std": [
+      14.530637741088867,
+      11.534087181091309,
+      4317.54443359375
+    ]
+  },
+  "kusto_deployable": true
+}

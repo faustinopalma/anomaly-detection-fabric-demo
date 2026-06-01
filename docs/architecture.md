@@ -54,6 +54,42 @@ by Eventhouse on every ingest into `raw_telemetry`, costs ~1× storage thanks
 to bin-row reconciliation, and serves as the Gold-tier wide table the
 multivariate scoring function reads from.
 
+## 2b. Current live deployment — per-machine models (3 machines)
+
+> The generic univariate/multivariate design above is the *toolbox*. The
+> **live demo** has converged on a simpler, production-realistic shape:
+> **one dedicated ONNX model per machine**, each with its own scaler and
+> threshold (read from the model's `metadata.threshold`). This avoids a
+> single hard-coded `machine=` filter in the scoring path.
+
+The live pipeline scores three machines, each through its own update-policy
+function attached to `anomalies`:
+
+| Machine | Model name | Sensors | Threshold | Data source |
+|---|---|---|---|---|
+| M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | 1.00679 | simulator physics |
+| M-002 | `transformer_ae_small__M-002` | 8 (synthetic) | 0.98171 | simulator physics |
+| M-003 | `transformer_ae_small__M-003` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 1.88170 | **real CNC profile** (`data/cnc_profile_M-003.json`) |
+
+- Each model is a `TransformerAE` (WINDOW=64) exported to FP16 ONNX so it
+  fits the Kusto 1 MB row budget. M-003 has 3 input features
+  (161 419 params); M-001/M-002 have 8.
+- Scoring functions `fn_score_demo_M001/M002/M003()` live in
+  [`kql/04_update_policy.kql`](../kql/04_update_policy.kql) and all attach to
+  the `anomalies` update policy. Each calls
+  `score_multivariate_onnx_batch(model_name=…, machine=…, bin=1s,
+  threshold=<from metadata>)`.
+- The cloud simulator (Container App `ca-simulator` in `rg-fabric-demo`)
+  runs `SIM_MACHINES=3` and drives M-003 from the recorded CNC profile via
+  `SIM_CNC_PROFILE=/app/cnc_profile_M-003.json` (a `CNCMachine` path in
+  `simulator-cloud/src/simulate_machines.py`).
+- To add another machine: train with `tools/train_per_machine.py`, register
+  with `tools/05_register_model.py models/<dir>`, add a
+  `fn_score_demo_<MID>()` function + a policy entry in
+  `kql/04_update_policy.kql`, apply with
+  `tools/02_setup_kql_tables.py kql/04_update_policy.kql`, and bump
+  `SIM_MACHINES`.
+
 
 ## 3. Items provisioned by `scripts/deploy.ps1`
 

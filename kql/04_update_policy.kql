@@ -4,6 +4,7 @@
 // Production realism: one model per machine.
 //   M-001 -> transformer_ae_small__M-001 (threshold from its own metadata)
 //   M-002 -> transformer_ae_small__M-002 (threshold from its own metadata)
+//   M-003 -> transformer_ae_small__M-003 (real-CNC model, 3 spindle sensors)
 //
 // Each batch ingested into `raw_telemetry` triggers BOTH scoring functions;
 // each function filters to its own machine, so cross-machine work is cheap.
@@ -68,6 +69,27 @@
         payload = bag_pack('model', model_name, 'version', model_version)
 }
 
+.create-or-alter function with (folder='scoring',
+        docstring='Score new-batch multivariate windows for M-003 (real CNC spindle) using its dedicated Transformer AE')
+    fn_score_demo_M003() {
+    let m         = latest_model('transformer_ae_small__M-003');
+    let threshold = todouble(toscalar(m | project todouble(metadata.threshold)));
+    score_multivariate_onnx_batch(
+        model_name = 'transformer_ae_small__M-003',
+        machine    = 'M-003',
+        bin        = 1s,
+        threshold  = threshold
+    )
+    | where is_anomaly
+    | project
+        detected_at, machine_id,
+        sensor_id    = '',
+        window_start, window_end,
+        model_name, model_version,
+        score, is_anomaly,
+        payload = bag_pack('model', model_name, 'version', model_version)
+}
+
 // Attach both per-machine functions to `anomalies` as update policies.
 // Each ingest batch into `raw_telemetry` triggers BOTH; only rows where
 // `is_anomaly` is true land in `anomalies`.
@@ -93,6 +115,13 @@
     "IsEnabled": true,
     "Source": "raw_telemetry",
     "Query": "fn_score_demo_M002()",
+    "IsTransactional": false,
+    "PropagateIngestionProperties": false
+  },
+  {
+    "IsEnabled": true,
+    "Source": "raw_telemetry",
+    "Query": "fn_score_demo_M003()",
     "IsTransactional": false,
     "PropagateIngestionProperties": false
   }

@@ -161,6 +161,16 @@ python tools/upload_notebook.py notebooks/03_train_multivariate_ae.ipynb
 Creates `nb_02_train_univariate_ae` and `nb_03_train_multivariate_ae`
 in the workspace; re-runs replace the definition in place.
 
+> **Live demo note — per-machine models.** The notebooks above are the
+> generic offline toolbox. The live demo runs **one dedicated ONNX model
+> per machine** (M-001, M-002 synthetic + 8 sensors; **M-003** a real-data
+> CNC machine with 3 sensors). Those models are trained with
+> `tools/train_per_machine.py`, registered with
+> `tools/05_register_model.py models/transformer_ae_small__<MID>`, and
+> scored by `fn_score_demo_M001/M002/M003()` in
+> [`kql/04_update_policy.kql`](../kql/04_update_policy.kql). See
+> [`architecture.md` §2b](architecture.md#2b-current-live-deployment--per-machine-models-3-machines).
+
 ---
 
 ## 10. Smoke-test ingestion with the local simulator

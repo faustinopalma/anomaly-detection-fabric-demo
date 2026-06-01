@@ -29,7 +29,8 @@ param(
     [string]$ImageTag = "latest",
     [int]   $Machines = 2,
     [double]$Rate     = 1.0,
-    [double]$AnomalyProb = 0.0005
+    [double]$AnomalyProb = 0.0005,
+    [string]$CncProfile = "/app/cnc_profile_M-003.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -88,17 +89,23 @@ az extension add --name containerapp --upgrade --only-show-errors 2>$null | Out-
 # ---------------------------------------------------------------------------
 # 2. Discover RG from Fabric capacity (unless overridden)
 # ---------------------------------------------------------------------------
-Write-Host "[deploy] looking up Fabric capacity '$($env:FABRIC_CAPACITY_NAME)' (RG + region)" -ForegroundColor Cyan
-# Note: --name filter is not honoured server-side for Microsoft.Fabric/capacities,
-# so we list all and filter client-side via JMESPath.
-$capInfo = az resource list `
-    --resource-type "Microsoft.Fabric/capacities" `
-    --query "[?name=='$($env:FABRIC_CAPACITY_NAME)'] | [0].{rg:resourceGroup,loc:location}" -o json | ConvertFrom-Json
-if (-not $capInfo) {
-    throw "Could not find a Microsoft.Fabric/capacities resource named '$($env:FABRIC_CAPACITY_NAME)' in this subscription."
+# Only auto-discover RG/region from the Fabric capacity when not provided
+# explicitly. The simulator may live in a different subscription than the
+# Fabric capacity, in which case the lookup would fail — passing -RgName and
+# -AcrName (and optionally -Location) bypasses it entirely.
+if (-not $RgName -or -not $Location) {
+    Write-Host "[deploy] looking up Fabric capacity '$($env:FABRIC_CAPACITY_NAME)' (RG + region)" -ForegroundColor Cyan
+    # Note: --name filter is not honoured server-side for Microsoft.Fabric/capacities,
+    # so we list all and filter client-side via JMESPath.
+    $capInfo = az resource list `
+        --resource-type "Microsoft.Fabric/capacities" `
+        --query "[?name=='$($env:FABRIC_CAPACITY_NAME)'] | [0].{rg:resourceGroup,loc:location}" -o json | ConvertFrom-Json
+    if (-not $capInfo) {
+        throw "Could not find a Microsoft.Fabric/capacities resource named '$($env:FABRIC_CAPACITY_NAME)' in this subscription. Pass -RgName and -Location explicitly to skip this lookup."
+    }
+    if (-not $RgName)    { $RgName    = $capInfo.rg }
+    if (-not $Location)  { $Location  = $capInfo.loc }
 }
-if (-not $RgName)    { $RgName    = $capInfo.rg }
-if (-not $Location)  { $Location  = $capInfo.loc }
 Write-Host "[deploy] using resource group: $RgName  (region: $Location)" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
@@ -157,7 +164,8 @@ $envVars = @(
     "PYTHONUNBUFFERED=1",
     "SIM_MACHINES=$Machines",
     "SIM_RATE=$Rate",
-    "SIM_ANOMALY_PROB=$AnomalyProb"
+    "SIM_ANOMALY_PROB=$AnomalyProb",
+    "SIM_CNC_PROFILE=$CncProfile"
 )
 
 $appExists = az containerapp show -g $RgName -n $AppName 2>$null

@@ -1,4 +1,4 @@
-"""Factory machine telemetry simulator (physics + FSM, cloud variant).
+"""Factory machine telemetry simulator (physics + FSM).
 
 Sends synthetic real-time measurements from N machines (each with 8 sensors)
 to the Fabric Eventstream `es_machines` via its Event Hubs-compatible
@@ -28,8 +28,9 @@ ProcessedIngestion column mapping):
 
 Usage
 -----
-    # In the cloud container this module is imported by cloud_runner.py;
-    # it is not invoked directly. See ../README.md for deploy instructions.
+    pip install -r simulator-local/requirements.txt
+    # then either set EVENTSTREAM_CONNECTION_STRING in .env, or pass --conn
+    python simulator-local/simulate_machines.py --machines 5 --rate 1 --duration 60
 
 Notes
 -----
@@ -62,6 +63,11 @@ from typing import Iterable
 import numpy as np
 from azure.eventhub import EventData, EventHubProducerClient
 from dotenv import load_dotenv
+
+# CNC engine (machine M-003) lives next to this file; it is also copied into
+# simulator-cloud/src for the container image.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cnc_engine import CncEngine, load_profile  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Operating-state FSM (ported from notebooks/01_simulator_dev.ipynb)
@@ -152,6 +158,7 @@ def pick_next_state(current: State) -> State:
     states, weights = zip(*spec.transitions)
     w = np.array(weights, dtype=float)
     w = w / w.sum()
+    # Pick by index: np.random.choice on enum members truncates strings.
     idx = int(np.random.choice(len(states), p=w))
     return states[idx]
 
@@ -183,19 +190,23 @@ class Machine:
     nominal_rpm: float = 3000.0
     ambient_c: float = 22.0
 
+    # FSM state
     state: State = State.OFF
     state_elapsed_s: float = 0.0
     state_dwell_s: float = field(default_factory=lambda: pick_dwell(State.OFF))
 
+    # Physical state
     load_actual: float = 0.0
     T_motor: float = 22.0
     T_bearing: float = 22.0
 
+    # Time constants (seconds)
     tau_load_ramp: float = 5.0
     tau_load_steady: float = 30.0
     tau_T_motor: float = 180.0
     tau_T_bearing: float = 300.0
 
+    # Sensor coefficients (tunable)
     k_current_a: float = 1.0
     k_current_b: float = 14.0
     k_power_factor: float = 0.42
@@ -229,6 +240,17 @@ class Machine:
         T_target_bearing = self.ambient_c + 0.85 * (self.T_motor - self.ambient_c)
         a_b = 1.0 - math.exp(-dt / self.tau_T_bearing)
         self.T_bearing += a_b * (T_target_bearing - self.T_bearing)
+
+    @property
+    def sensor_names(self) -> list[str]:
+        return list(SENSOR_NAMES)
+
+    def is_active(self) -> bool:
+        return self.state != State.OFF
+
+    def status(self) -> str:
+        return (f"state={self.state.value} load={self.load_actual:.2f} "
+                f"T_motor={self.T_motor:.1f}C")
 
     def sample(self) -> dict[str, float]:
         if self.state == State.OFF:
@@ -268,7 +290,8 @@ class AnomalyOverlay:
 
     Applied AFTER the physics sample() so the underlying state stays clean.
     This is the streaming-time analogue of the offline injectors in
-    notebook section 8.
+    notebook section 8; it is intentionally simple because real evaluation
+    happens on the labelled eval dataset, not on live telemetry.
     """
 
     kind: str            # "spike" | "drift" | "stuck"
@@ -278,6 +301,7 @@ class AnomalyOverlay:
     stuck_value: float | None = None
 
     def apply(self, sample_dict: dict[str, float], now: float) -> float:
+        """Return modified quality. Mutates sample_dict[self.sensor] in place."""
         v = sample_dict[self.sensor]
         if self.kind == "spike":
             sample_dict[self.sensor] = v + max(abs(v) * 0.5, 1.0) * random.uniform(1.5, 3.0)
@@ -286,15 +310,48 @@ class AnomalyOverlay:
             t_in = 1.0 - max(0.0, self.until - now) / max(1e-6, self.duration)
             sample_dict[self.sensor] = v + t_in * max(abs(v) * 0.4, 1.0)
             return 0.7
+        # stuck
         if self.stuck_value is None:
             self.stuck_value = v
         sample_dict[self.sensor] = self.stuck_value
         return 0.4
 
 
-def maybe_trigger_overlay(now: float) -> AnomalyOverlay:
+# ---------------------------------------------------------------------------
+# CNC empirical machine (M-003) - wraps the profile-driven CncEngine in the
+# same interface as the FSM Machine so the run loop stays polymorphic.
+# ---------------------------------------------------------------------------
+
+
+class CNCMachine:
+    """Real-data-derived CNC spindle machine (see simulator-local/cnc_engine.py)."""
+
+    def __init__(self, machine_id: str, profile: dict, seed: int | None = None) -> None:
+        self.machine_id = machine_id
+        self._eng = CncEngine(profile, np.random.default_rng(seed))
+        self._sensor_names = list(self._eng.sensors)
+
+    @property
+    def sensor_names(self) -> list[str]:
+        return list(self._sensor_names)
+
+    def is_active(self) -> bool:
+        return self._eng.active
+
+    def step(self, dt: float) -> None:
+        self._eng.step(dt)
+
+    def sample(self) -> dict[str, float]:
+        return self._eng.sample()
+
+    def status(self) -> str:
+        mode = "CUT" if self._eng.active else "idle"
+        return f"mode={mode}"
+
+
+def maybe_trigger_overlay(now: float, sensor_names: list[str]) -> AnomalyOverlay:
     kind = random.choice(["spike", "drift", "stuck"])
-    sensor = random.choice(SENSOR_NAMES)
+    sensor = random.choice(sensor_names)
     if kind == "spike":
         return AnomalyOverlay(kind, sensor, now + 0.5, 0.5)
     if kind == "drift":
@@ -313,16 +370,28 @@ def iso_utc(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
-def build_machines(n_machines: int) -> dict[str, Machine]:
-    machines: dict[str, Machine] = {}
+def build_machines(n_machines: int, cnc_profile: dict | None = None,
+                   cnc_machine_id: str | None = None) -> dict[str, object]:
+    """Build the fleet.
+
+    FSM physics machines are created for every id; if ``cnc_profile`` is given,
+    the machine whose id matches ``cnc_machine_id`` (default: the last one,
+    ``M-{n:03d}``) is replaced by a real-data-derived :class:`CNCMachine`.
+    """
+    cnc_id = cnc_machine_id or (f"M-{n_machines:03d}" if cnc_profile else None)
+    machines: dict[str, object] = {}
     for i in range(1, n_machines + 1):
         machine_id = f"M-{i:03d}"
-        m = Machine(
+        if cnc_profile is not None and machine_id == cnc_id:
+            machines[machine_id] = CNCMachine(machine_id, cnc_profile)
+            continue
+        # Per-machine variation in nominal RPM so the fleet looks like
+        # individual units (mirrors the per-machine seed used in the notebook).
+        machines[machine_id] = Machine(
             machine_id=machine_id,
             nominal_rpm=3000.0 * random.uniform(0.98, 1.02),
             state=State.OFF,
         )
-        machines[machine_id] = m
     return machines
 
 
@@ -333,7 +402,7 @@ def chunked(seq: list[dict], size: int) -> Iterable[list[dict]]:
 
 def run(
     conn_str: str,
-    machines: dict[str, Machine],
+    machines: dict[str, object],
     rate_per_sensor: float,
     duration_s: float,
     anomaly_prob: float,
@@ -341,21 +410,21 @@ def run(
     quiet: bool,
 ) -> None:
     producer = EventHubProducerClient.from_connection_string(conn_str)
-    interval = 1.0 / rate_per_sensor
+    interval = 1.0 / rate_per_sensor          # FSM dt
     deadline = time.time() + duration_s if duration_s > 0 else float("inf")
     next_tick = time.time()
 
-    sensors_per_machine = len(SENSOR_NAMES)
-    total_per_tick = len(machines) * sensors_per_machine
+    sensors_total = sum(len(m.sensor_names) for m in machines.values())
+    total_per_tick = sensors_total
     if not quiet:
         print(
-            f"[sim] machines={len(machines)} sensors/machine={sensors_per_machine} "
+            f"[sim] machines={len(machines)} sensors_total={sensors_total} "
             f"rate={rate_per_sensor}/s -> {int(total_per_tick * rate_per_sensor)} events/s "
             f"duration={'inf' if duration_s <= 0 else f'{duration_s:.0f}s'} "
-            f"dt={interval:.3f}s",
-            flush=True,
+            f"dt={interval:.3f}s"
         )
 
+    # Active per-machine anomaly overlays (at most one per machine at a time)
     active: dict[str, AnomalyOverlay] = {}
 
     sent = 0
@@ -373,21 +442,14 @@ def run(
                     if ov is not None and now >= ov.until:
                         active.pop(machine_id, None)
                         ov = None
-                    if ov is None and m.state != State.OFF and random.random() < anomaly_prob:
-                        ov = maybe_trigger_overlay(now)
+                    if ov is None and m.is_active() and random.random() < anomaly_prob:
+                        ov = maybe_trigger_overlay(now, m.sensor_names)
                         active[machine_id] = ov
-                        # Emit a "ground truth" marker event so downstream tools can
-                        # correlate the injection with the model's detection.
-                        # Encoded as a fake telemetry row with a special sensor_id.
-                        events.append({
-                            "machine_id": machine_id,
-                            "sensor_id":  f"__inject__{ov.kind}:{ov.sensor}",
-                            "ts":         iso_utc(now),
-                            "value":      round(float(ov.duration), 3),
-                            "quality":    -1.0,
-                        })
 
-                    ov_quality = ov.apply(s, now) if ov is not None else None
+                    if ov is not None:
+                        ov_quality = ov.apply(s, now)
+                    else:
+                        ov_quality = None
 
                     ts_iso = iso_utc(now)
                     for sensor_id, value in s.items():
@@ -411,10 +473,7 @@ def run(
                     first_m = next(iter(machines.values()))
                     print(
                         f"[sim] +{len(events):4d} ev (total {sent:>7d})  "
-                        f"{first_m.machine_id} state={first_m.state.value} "
-                        f"load={first_m.load_actual:.2f} "
-                        f"T_motor={first_m.T_motor:.1f}C",
-                        flush=True,
+                        f"{first_m.machine_id} {first_m.status()}"
                     )
 
                 next_tick += interval
@@ -422,23 +481,36 @@ def run(
                 if sleep_for > 0:
                     time.sleep(sleep_for)
                 else:
+                    # Falling behind; reset cadence to avoid drift accumulation.
                     next_tick = time.time()
     except KeyboardInterrupt:
-        print("\n[sim] interrupted by user", flush=True)
+        print("\n[sim] interrupted by user")
     finally:
-        print(f"[sim] sent {sent} events total", flush=True)
+        print(f"[sim] sent {sent} events total")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--machines", type=int, default=2)
-    p.add_argument("--rate", type=float, default=1.0)
-    p.add_argument("--duration", type=float, default=0)
-    p.add_argument("--anomaly-prob", type=float, default=0.0)
-    p.add_argument("--batch-size", type=int, default=200)
-    p.add_argument("--conn", type=str, default=None)
-    p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--quiet", action="store_true")
+    p.add_argument("--machines", type=int, default=2, help="Number of machines to simulate (default 2)")
+    p.add_argument("--rate", type=float, default=1.0,
+                   help="Samples per second per sensor (default 1.0). FSM dt = 1/rate.")
+    p.add_argument("--duration", type=float, default=0,
+                   help="Run duration in seconds. 0 = run forever until Ctrl-C (default 0).")
+    p.add_argument("--anomaly-prob", type=float, default=0.0,
+                   help="Per-machine-tick probability of triggering a streaming overlay "
+                        "(spike/drift/stuck) on a random sensor (default 0 = disabled). "
+                        "Use the labelled eval dataset for real evaluation.")
+    p.add_argument("--batch-size", type=int, default=200,
+                   help="Max events per Event Hubs batch (default 200).")
+    p.add_argument("--conn", type=str, default=None,
+                   help="Eventstream Event-Hub-compatible connection string. "
+                        "Defaults to env var EVENTSTREAM_CONNECTION_STRING.")
+    p.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
+    p.add_argument("--cnc-profile", type=str, default=None,
+                   help="Path to a CNC profile JSON (e.g. data/cnc_profile_M-003.json). "
+                        "When set, the last machine (M-{machines:03d}) is driven by the "
+                        "real-data-derived CNC engine instead of the FSM physics model.")
+    p.add_argument("--quiet", action="store_true", help="Suppress per-tick log output.")
     return p.parse_args(argv)
 
 
@@ -451,8 +523,10 @@ def main(argv: list[str] | None = None) -> int:
     conn_str = args.conn or os.environ.get("EVENTSTREAM_CONNECTION_STRING")
     if not conn_str:
         print(
-            "ERROR: no Eventstream connection string. Set EVENTSTREAM_CONNECTION_STRING in env "
-            "or pass --conn '<connection-string>'.",
+            "ERROR: no Eventstream connection string. Set EVENTSTREAM_CONNECTION_STRING in .env "
+            "or pass --conn '<connection-string>'.\n"
+            "Get it from the Fabric portal: open Eventstream `es_machines` -> add a Custom App "
+            "source -> on its Details pane copy 'Connection string-primary key'.",
             file=sys.stderr,
         )
         return 2
@@ -463,7 +537,19 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGINT, signal.default_int_handler)
 
-    machines = build_machines(args.machines)
+    cnc_profile = None
+    cnc_path = args.cnc_profile or os.environ.get("SIM_CNC_PROFILE")
+    if cnc_path:
+        cnc_path = Path(cnc_path)
+        if not cnc_path.is_absolute():
+            cnc_path = repo_root / cnc_path
+        if not cnc_path.exists():
+            print(f"ERROR: CNC profile not found: {cnc_path}", file=sys.stderr)
+            return 2
+        cnc_profile = load_profile(cnc_path)
+        print(f"[sim] CNC profile loaded for M-{args.machines:03d}: {cnc_path.name}")
+
+    machines = build_machines(args.machines, cnc_profile=cnc_profile)
     run(
         conn_str=conn_str,
         machines=machines,

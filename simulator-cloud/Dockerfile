@@ -13,9 +13,10 @@ RUN pip install -r requirements.txt
 COPY src/ .
 
 # Defaults — override per-deployment via Container Apps env vars
-ENV SIM_MACHINES=5 \
+ENV SIM_MACHINES=3 \
     SIM_RATE=1 \
     SIM_ANOMALY_PROB=0.0005 \
-    SIM_BATCH_SIZE=200
+    SIM_BATCH_SIZE=200 \
+    SIM_CNC_PROFILE=/app/cnc_profile_M-003.json
 
 CMD ["python", "-u", "cloud_runner.py"]
