@@ -30,7 +30,20 @@ param(
     [int]   $Machines = 2,
     [double]$Rate     = 1.0,
     [double]$AnomalyProb = 0.0005,
-    [string]$CncProfile = "/app/cnc_profile_M-003.json"
+    [string]$CncProfile = "/app/cnc_profile_M-003.json",
+
+    # --- Control plane / auth (optional) -----------------------------------
+    # When -EnableControl is set, the container exposes the FastAPI control
+    # API on external ingress (port 8080). Pass -AuthTenantId/-AuthClientId to
+    # gate it behind Entra ID; omit them (and pass -ControlApiKey) to use the
+    # shared-key fallback instead.
+    [switch]$EnableControl,
+    [string]$AuthTenantId,
+    [string]$AuthClientId,
+    [switch]$AuthAllowApiKey,
+    [string]$ControlApiKey,
+    [string]$CorsOrigins,
+    [int]   $ControlPort = 8080
 )
 
 $ErrorActionPreference = "Stop"
@@ -168,12 +181,32 @@ $envVars = @(
     "SIM_CNC_PROFILE=$CncProfile"
 )
 
+# Secrets to (re)apply on every deploy.
+$secrets = @("eventstream-conn=$($env:EVENTSTREAM_CONNECTION_STRING)")
+
+# Control plane + auth env vars (only when -EnableControl).
+if ($EnableControl) {
+    $envVars += "SIM_CONTROL_ENABLED=1"
+    $envVars += "SIM_CONTROL_PORT=$ControlPort"
+    if ($CorsOrigins)   { $envVars += "SIM_CONTROL_CORS_ORIGINS=$CorsOrigins" }
+    if ($ControlApiKey) {
+        $secrets += "control-api-key=$ControlApiKey"
+        $envVars += "SIM_CONTROL_API_KEY=secretref:control-api-key"
+    }
+    if ($AuthTenantId -and $AuthClientId) {
+        $envVars += "SIM_AUTH_ENABLED=1"
+        $envVars += "SIM_AUTH_TENANT_ID=$AuthTenantId"
+        $envVars += "SIM_AUTH_CLIENT_ID=$AuthClientId"
+        $envVars += ("SIM_AUTH_ALLOW_APIKEY=" + ($(if ($AuthAllowApiKey) { "1" } else { "0" })))
+    }
+}
+
 $appExists = az containerapp show -g $RgName -n $AppName 2>$null
 if ($appExists) {
     Write-Host "[deploy] updating existing container app '$AppName' ..." -ForegroundColor Cyan
     # Refresh secret + image
     az containerapp secret set -g $RgName -n $AppName `
-        --secrets "eventstream-conn=$($env:EVENTSTREAM_CONNECTION_STRING)" | Out-Null
+        --secrets @secrets | Out-Null
     az containerapp registry set -g $RgName -n $AppName `
         --server "$AcrName.azurecr.io" --username $acrUser --password $acrPass | Out-Null
     # Always force a new revision so env-var only changes take effect even
@@ -193,10 +226,24 @@ if ($appExists) {
         --registry-server "$AcrName.azurecr.io" `
         --registry-username $acrUser `
         --registry-password $acrPass `
-        --secrets "eventstream-conn=$($env:EVENTSTREAM_CONNECTION_STRING)" `
+        --secrets @secrets `
         --env-vars @envVars `
         --min-replicas 1 --max-replicas 1 `
         --cpu 0.25 --memory 0.5Gi | Out-Null
+}
+
+# ---------------------------------------------------------------------------
+# 6b. External ingress for the control API (idempotent) + report endpoint
+# ---------------------------------------------------------------------------
+if ($EnableControl) {
+    Write-Host "[deploy] enabling external ingress on port $ControlPort" -ForegroundColor Cyan
+    az containerapp ingress enable -g $RgName -n $AppName `
+        --type external --target-port $ControlPort --transport auto | Out-Null
+    $fqdn = az containerapp show -g $RgName -n $AppName `
+        --query "properties.configuration.ingress.fqdn" -o tsv
+    if ($fqdn) {
+        Write-Host "[deploy] control API endpoint: https://$fqdn" -ForegroundColor Green
+    }
 }
 
 Write-Host ""

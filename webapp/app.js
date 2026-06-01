@@ -5,6 +5,21 @@ const POLL_MS = 2000;
 const el = (id) => document.getElementById(id);
 const state = { timer: null, busy: new Set(), account: null };
 
+// Fail loud (not silent) if the auth library or config didn't load.
+if (typeof msal === "undefined" || typeof CONFIG === "undefined") {
+  document.addEventListener("DOMContentLoaded", () => {
+    const s = el("signin");
+    if (s) s.classList.remove("hidden");
+    const e = el("signin-error");
+    if (e) {
+      e.textContent =
+        "Authentication library failed to load (vendor/msal-browser.min.js or config.js missing). Try a hard refresh.";
+      e.classList.remove("hidden");
+    }
+  });
+  throw new Error("MSAL or CONFIG not available");
+}
+
 // ---- MSAL auth -----------------------------------------------------------
 
 const msalApp = new msal.PublicClientApplication({

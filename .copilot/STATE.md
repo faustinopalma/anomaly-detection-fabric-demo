@@ -1,8 +1,41 @@
 # Current state
 
-_Last updated: 2026-06-02 (docs/dashboard audit + Static Web App control panel deployed live)_
+_Last updated: 2026-06-02 (MSAL login fix + fully scripted repeatable deploy)_
 
-## Latest session (2026-06-02) — Entra ID login on the control panel (DONE, live)
+## Latest session (2026-06-02b) — MSAL login fix + scripted repeatable deploy (DONE, live)
+
+The control panel showed "not connected" and never prompted for login because
+the MSAL.js CDN URL (`alcdn.msftauth.net/...`) returned **404** → `msal` was
+undefined → `new msal.PublicClientApplication(...)` threw at load → boot never
+ran. Fixes + the new "everything must be scripted/repeatable" requirement:
+
+- **MSAL vendored locally**: `webapp/vendor/msal-browser.min.js` (2.38.4,
+  376 037 bytes, from jsDelivr). `index.html` now loads
+  `vendor/msal-browser.min.js` → `config.js` → `app.js` (CDN removed).
+- **Fail-loud guard** in `app.js`: if `msal`/`CONFIG` missing, the sign-in card
+  is shown with an explicit error instead of dying silently.
+- **Republished + verified live**: `vendor/msal-browser.min.js` 200/376037,
+  `config.js` 200, `app.js` 200, `index.html` 200 on the SWA. Backend re-check:
+  healthz 200, `/api/state` 401 without token, **200 with a real Entra token**.
+
+**Repeatable deploy — now fully scripted (no manual `az rest`/portal steps):**
+- `scripts/setup-app-registration.ps1` (new) — idempotent Entra app-reg setup
+  (app/SP, identifierUris, SPA redirect URIs, `access_as_user` scope, token v2,
+  Azure CLI pre-auth, `appRoleAssignmentRequired`, signed-in-user assignment,
+  admin consent). Writes `SIM_AUTH_*` to `.env`; returns ClientId/Scope/etc.
+- `simulator-cloud/deploy.ps1` (updated) — new `-EnableControl`,
+  `-AuthTenantId/-AuthClientId`, `-AuthAllowApiKey`, `-ControlApiKey`,
+  `-CorsOrigins`, `-ControlPort` params; builds a `--secrets` array; sets the
+  `SIM_CONTROL_*`/`SIM_AUTH_*` env; enables **external ingress** on the control
+  port and prints the FQDN.
+- `webapp/deploy.ps1` (updated) — generates `config.js` from the discovered
+  backend FQDN + tenant/client/scope, vendors MSAL if missing, then `swa deploy`.
+- `scripts/deploy-control-panel.ps1` (new) — master orchestrator: SWA →
+  app-reg → container control API → webapp publish, idempotent end-to-end.
+
+All four scripts pass `Parser::ParseFile` syntax validation.
+
+## Earlier session (2026-06-02) — Entra ID login on the control panel (DONE, live)
 
 Refactor: removed the manual API-base/X-API-Key entry from the panel, wired
 the backend in permanently, and gated access behind **Microsoft Entra ID
