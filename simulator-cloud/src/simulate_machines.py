@@ -58,11 +58,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TYPE_CHECKING
 
 import numpy as np
 from azure.eventhub import EventData, EventHubProducerClient
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from control import ControlState
 
 # CNC engine (machine M-003) lives next to this file; it is also copied into
 # simulator-cloud/src for the container image.
@@ -361,6 +364,26 @@ def maybe_trigger_overlay(now: float, sensor_names: list[str]) -> AnomalyOverlay
     return AnomalyOverlay(kind, sensor, now + d, d)
 
 
+def manual_overlay(
+    now: float, kind: str, sensor: str | None, sensor_names: list[str]
+) -> AnomalyOverlay:
+    """Build an overlay for an operator-requested manual injection.
+
+    Like :func:`maybe_trigger_overlay` but with a caller-chosen ``kind`` and
+    optional ``sensor`` (random when omitted) and fixed, demo-friendly
+    durations so the effect is clearly visible.
+    """
+    sensor = sensor or random.choice(sensor_names)
+    if kind == "spike":
+        return AnomalyOverlay("spike", sensor, now + 0.5, 0.5)
+    if kind == "drift":
+        d = 12.0
+        return AnomalyOverlay("drift", sensor, now + d, d)
+    d = 10.0
+    return AnomalyOverlay("stuck", sensor, now + d, d)
+
+
+
 # ---------------------------------------------------------------------------
 # Simulator main loop
 # ---------------------------------------------------------------------------
@@ -400,16 +423,47 @@ def chunked(seq: list[dict], size: int) -> Iterable[list[dict]]:
         yield seq[i : i + size]
 
 
+class _NullBatch(list):
+    """Drop-in for an Event Hubs batch that just collects events locally."""
+
+    def add(self, event: object) -> None:  # noqa: D401 - mimic SDK signature
+        self.append(event)
+
+
+class _NullProducer:
+    """No-op producer used by the offline/dry-run mode so the simulator can be
+    exercised (and the control API tested) without an Event Hubs connection."""
+
+    def __enter__(self) -> "_NullProducer":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def create_batch(self) -> _NullBatch:
+        return _NullBatch()
+
+    def send_batch(self, batch: _NullBatch) -> None:
+        return None
+
+
 def run(
-    conn_str: str,
+    conn_str: str | None,
     machines: dict[str, object],
     rate_per_sensor: float,
     duration_s: float,
     anomaly_prob: float,
     batch_size: int,
     quiet: bool,
+    control: "ControlState | None" = None,
+    dry_run: bool = False,
 ) -> None:
-    producer = EventHubProducerClient.from_connection_string(conn_str)
+    if dry_run:
+        producer = _NullProducer()
+        if not quiet:
+            print("[sim] DRY-RUN: events are generated but not sent to Event Hubs")
+    else:
+        producer = EventHubProducerClient.from_connection_string(conn_str)
     interval = 1.0 / rate_per_sensor          # FSM dt
     deadline = time.time() + duration_s if duration_s > 0 else float("inf")
     next_tick = time.time()
@@ -442,7 +496,24 @@ def run(
                     if ov is not None and now >= ov.until:
                         active.pop(machine_id, None)
                         ov = None
-                    if ov is None and m.is_active() and random.random() < anomaly_prob:
+
+                    # Per-machine random probability when an operator control
+                    # plane is attached; otherwise the global CLI/env value.
+                    prob = (
+                        control.effective_anomaly_prob(machine_id)
+                        if control is not None
+                        else anomaly_prob
+                    )
+
+                    # Operator-requested manual injection takes priority over
+                    # the random overlay and fires regardless of machine state.
+                    if ov is None and control is not None:
+                        req = control.pop_injection(machine_id)
+                        if req is not None:
+                            ov = manual_overlay(now, req.kind, req.sensor, m.sensor_names)
+                            active[machine_id] = ov
+
+                    if ov is None and m.is_active() and random.random() < prob:
                         ov = maybe_trigger_overlay(now, m.sensor_names)
                         active[machine_id] = ov
 
@@ -450,6 +521,20 @@ def run(
                         ov_quality = ov.apply(s, now)
                     else:
                         ov_quality = None
+
+                    if control is not None:
+                        st = getattr(m, "state", None)
+                        state_label = (
+                            st.value if st is not None
+                            else ("active" if m.is_active() else "idle")
+                        )
+                        control.update_status(
+                            machine_id,
+                            state=state_label,
+                            active=m.is_active(),
+                            sample=s,
+                            active_anomaly=ov.kind if ov is not None else None,
+                        )
 
                     ts_iso = iso_utc(now)
                     for sensor_id, value in s.items():
@@ -511,17 +596,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         "When set, the last machine (M-{machines:03d}) is driven by the "
                         "real-data-derived CNC engine instead of the FSM physics model.")
     p.add_argument("--quiet", action="store_true", help="Suppress per-tick log output.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Generate telemetry but do not send it to Event Hubs "
+                        "(no connection string required). Useful for local "
+                        "testing of the control API / Static Web App.")
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, control: "ControlState | None" = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
     repo_root = Path(__file__).resolve().parent.parent
     load_dotenv(repo_root / ".env")
 
     conn_str = args.conn or os.environ.get("EVENTSTREAM_CONNECTION_STRING")
-    if not conn_str:
+    dry_run = args.dry_run or os.environ.get("SIM_DRY_RUN", "").lower() in ("1", "true", "yes")
+    if not conn_str and not dry_run:
         print(
             "ERROR: no Eventstream connection string. Set EVENTSTREAM_CONNECTION_STRING in .env "
             "or pass --conn '<connection-string>'.\n"
@@ -535,7 +625,12 @@ def main(argv: list[str] | None = None) -> int:
         random.seed(args.seed)
         np.random.seed(args.seed)
 
-    signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+    except ValueError:
+        # signal.signal only works in the main thread; when the simulator is
+        # driven from a worker thread (e.g. local tests) just skip it.
+        pass
 
     cnc_profile = None
     cnc_path = args.cnc_profile or os.environ.get("SIM_CNC_PROFILE")
@@ -550,6 +645,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[sim] CNC profile loaded for M-{args.machines:03d}: {cnc_path.name}")
 
     machines = build_machines(args.machines, cnc_profile=cnc_profile)
+    if control is not None:
+        control.register_machines(machines)
     run(
         conn_str=conn_str,
         machines=machines,
@@ -558,6 +655,8 @@ def main(argv: list[str] | None = None) -> int:
         anomaly_prob=args.anomaly_prob,
         batch_size=args.batch_size,
         quiet=args.quiet,
+        control=control,
+        dry_run=dry_run,
     )
     return 0
 
