@@ -1,0 +1,13 @@
+name: anomaly-train-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - numpy==1.26.4
+      - pandas==2.2.2
+      - pyarrow==16.1.0
+      - torch==2.3.1
+      - onnx==1.16.1
+      - onnxruntime==1.18.1

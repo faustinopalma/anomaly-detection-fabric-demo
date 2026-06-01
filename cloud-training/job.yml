@@ -1,0 +1,20 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+# Azure ML command job: generate synthetic telemetry + train one
+# transformer_ae_small model per machine, exporting FP16 ONNX artifacts.
+#
+# Submit:
+#   az ml job create -f cloud-training/job.yml \
+#     --resource-group rg-anomaly-ml-westeurope \
+#     --workspace-name anomalyml-mlw
+code: ./src
+command: >-
+  python generate_and_train.py
+  --machines M-001 M-002
+  --hours 8
+  --epochs 12
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04:latest
+  conda_file: ./environment/conda.yml
+compute: azureml:cpu-cluster
+display_name: anomaly-per-machine-ae-training
+experiment_name: anomaly-detection
