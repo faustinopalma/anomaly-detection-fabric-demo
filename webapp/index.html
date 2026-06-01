@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulator control panel</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Factory simulator &mdash; control panel</h1>
+    <div id="conn-status" class="pill pill-unknown">not connected</div>
+  </header>
+
+  <section id="config" class="card">
+    <h2>Connection</h2>
+    <p class="hint">
+      Point this at the simulator container's control API. The API key is the
+      shared <code>X-API-Key</code> secret (demo-grade). Values are stored in
+      your browser only.
+    </p>
+    <div class="config-row">
+      <label>API base URL
+        <input id="api-base" type="url" placeholder="https://ca-simulator.&lt;region&gt;.azurecontainerapps.io" />
+      </label>
+      <label>API key
+        <input id="api-key" type="password" placeholder="X-API-Key value" />
+      </label>
+      <button id="connect-btn" type="button">Connect</button>
+    </div>
+  </section>
+
+  <section id="offline-banner" class="banner hidden">
+    <strong>Container unreachable.</strong>
+    <span id="offline-detail">The simulator may be stopped to save cost. The
+    panel is inactive; controls are disabled until it responds.</span>
+  </section>
+
+  <section id="fleet-meta" class="meta hidden">
+    <span id="meta-machines"></span>
+    <span id="meta-uptime"></span>
+    <span id="meta-updated"></span>
+  </section>
+
+  <main id="machines" class="grid"></main>
+
+  <footer>
+    <span>Polls <code>/api/state</code> every 2&nbsp;s. Suggested demo flow:
+    turn a machine's random anomalies <em>off</em>, then inject a spike, drift
+    or stuck anomaly manually to show the detector reacting.</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
