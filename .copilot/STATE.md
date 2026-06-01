@@ -1,6 +1,6 @@
 # Current state
 
-_Last updated: 2026-06-02 (docs/dashboard audit + Static Web App control panel)_
+_Last updated: 2026-06-02 (docs/dashboard audit + Static Web App control panel deployed live)_
 
 ## Latest session (2026-06-02) — docs audit + SWA control panel
 
@@ -45,15 +45,35 @@ Validated locally end-to-end over real HTTP (dry-run sim + uvicorn on
 persists, inject accepted, and `401`/`422`/`404` rejections all correct.
 The FastAPI TestClient suite also passed.
 
-**Manual steps left to the user (NOT done unattended):** the live
-`ca-simulator` container still has NO inbound API. To go live: enable
-external ingress on the control port and set `SIM_CONTROL_ENABLED=1` +
-`SIM_CONTROL_API_KEY` (+ `SIM_CONTROL_CORS_ORIGINS`), then redeploy the
-container and run `webapp/deploy.ps1`. Exact commands are in
-`infra/swa.bicep` and `webapp/README.md`.
+**Live deploy (DONE this session — user authorized; user owns cost shutdown).**
+The control panel is now fully deployed and validated live on Azure:
+- **Container** `ca-simulator` (RG `rg-fabric-demo`, region `italynorth`):
+  rebuilt image `acrsimnsb7uf.azurecr.io/simulator:v2606011853` (ACR cloud
+  build, verified Succeeded via `az acr task list-runs`), enabled **external
+  ingress** on port 8080, set secret `control-api-key`, and env
+  `SIM_CONTROL_ENABLED=1`, `SIM_CONTROL_PORT=8080`,
+  `SIM_CONTROL_API_KEY=secretref:control-api-key`,
+  `SIM_CONTROL_CORS_ORIGINS=https://jolly-pebble-0d6f26703.7.azurestaticapps.net`.
+  Running revision `ca-simulator--0000003`.
+  Control FQDN: `https://ca-simulator.thankfulground-943b41a0.italynorth.azurecontainerapps.io`.
+- **Static Web App** `swa-anomaly-sim` (RG `rg-fabric-demo`, Free SKU,
+  westeurope) deployed from `infra/swa.bicep`; `webapp/` published via SWA
+  CLI (`swa deploy ./webapp --env production`).
+  URL: `https://jolly-pebble-0d6f26703.7.azurestaticapps.net`.
+- **Live validation passed:** `/healthz` ok (3 machines), `/api/state`
+  returns M-001/M-002 (8 sensors) + M-003 (CNC: mandrino_load/power/torque),
+  random toggle persists, manual inject queued, `401`/`422`/`404` correct,
+  and CORS `Access-Control-Allow-Origin` matches the SWA origin.
+- Demo API key stored git-ignored in `_local/_control_api_key.txt`.
+
+**Cost note:** the container app + Fabric capacity remain running. The USER
+will stop the container app and pause the Fabric capacity when minimizing
+cost (per explicit instruction). When the container is stopped the panel
+shows its offline banner.
 
 Commits this session: `23fefc2`, `91d6eb4` (Task A), `11d4dee`, `82aa841`,
-`a22f9d5`, `19c0284`, `5e19c66`, `f357afd` (Task B).
+`a22f9d5`, `19c0284`, `5e19c66`, `f357afd` (Task B code), plus the live-deploy
+doc update.
 
 ## Where we are
 

@@ -1,6 +1,6 @@
 # Plan
 
-_Last updated: 2026-06-02 (Task A done; Task B SWA control panel done — live deploy is manual)_
+_Last updated: 2026-06-02 (Task A done; Task B SWA control panel done + deployed live)_
 
 ## DONE — Task B: Static Web App control panel for the simulator
 
@@ -29,6 +29,20 @@ Sub-steps (all tested + committed + pushed):
 5. ✅ `infra/swa.bicep` (Free SKU, `bicep build` OK). Commit `5e19c66`.
 6. ✅ `webapp/deploy.ps1` local deploy helper + local e2e test over real
    HTTP (dry-run sim + uvicorn). Commit `f357afd`.
+
+7. ✅ **Live deploy (user authorized).** Rebuilt+pushed image
+   `simulator:v2606011853`, enabled external ingress (port 8080) + control
+   env/secret on `ca-simulator` (revision `0000003`), deployed SWA
+   `swa-anomaly-sim`, published `webapp/` via SWA CLI. Validated live:
+   healthz/state/toggle/inject + 401/422/404 + CORS all pass.
+   - Panel URL: `https://jolly-pebble-0d6f26703.7.azurestaticapps.net`
+   - Control FQDN: `https://ca-simulator.thankfulground-943b41a0.italynorth.azurecontainerapps.io`
+   - Demo API key in git-ignored `_local/_control_api_key.txt`.
+
+**Cost shutdown is the user's responsibility** (per instruction): stop the
+container app + pause Fabric capacity to minimize cost. When the container is
+stopped the panel shows its offline banner and stays inactive — exactly the
+requested behavior.
 
 **Manual step left for the user (never modify live infra unattended):**
 enable external ingress on `ca-simulator` for `SIM_CONTROL_PORT` and set
