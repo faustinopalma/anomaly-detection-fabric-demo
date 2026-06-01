@@ -1,6 +1,59 @@
 # Current state
 
-_Last updated: 2026-06-01 (M-003 real-data CNC machine added, 3 machines live)_
+_Last updated: 2026-06-02 (docs/dashboard audit + Static Web App control panel)_
+
+## Latest session (2026-06-02) — docs audit + SWA control panel
+
+Two user tasks, done one at a time with incremental commits (all pushed).
+
+**Task A — docs & dashboard audit (DONE).** Live fleet is **3 machines**
+(M-001/M-002 synthetic + M-003 CNC); M-004 exists only as a trained
+benchmark and is intentionally **not wired live** (decision locked). Audited
+and corrected docs (`README.md`, `docs/architecture.md`,
+`docs/model_architecture_options.md`, `tools/README.md`) to say 3 machines
+and document the CNC machine. The real-time dashboard `rtd_telemetry_live`
+was missing CNC coverage → added 3 CNC timecharts (`mandrino_load/power/
+torque`) in `tools/04_create_dashboard.py` and applied them live
+(idempotent update). Commits `23fefc2`, `91d6eb4`.
+
+**Task B — Static Web App control panel (DONE, infra deploy is manual).**
+Added a browser control panel that talks to a NEW control API on the cloud
+simulator:
+- `simulator-cloud/src/control.py` — thread-safe `ControlState` (per-machine
+  random-anomaly toggle + manual injection queue + live status snapshot).
+- `simulator-cloud/src/server.py` — FastAPI control server. Endpoints:
+  `GET /healthz` (no auth), `GET /api/state`, `POST /api/machines/{id}/random`
+  `{enabled}`, `POST /api/machines/{id}/inject` `{kind: spike|drift|stuck,
+  sensor?}`. Auth = `X-API-Key` (demo-grade shared secret), CORS enabled.
+- `simulator-cloud/src/simulate_machines.py` — per-machine effective anomaly
+  prob from ControlState, consumes manual injections (`manual_overlay`:
+  spike 0.5 s / drift 12 s / stuck 10 s), reports status. Added `--dry-run`
+  (`SIM_DRY_RUN`, null producer) so it runs with no Event Hubs.
+- `simulator-cloud/src/cloud_runner.py` — starts the control server thread
+  when `SIM_CONTROL_ENABLED=1` (`SIM_CONTROL_API_KEY`, `SIM_CONTROL_PORT`
+  default 8080, `SIM_CONTROL_CORS_ORIGINS`).
+- `webapp/` — no-build HTML/CSS/JS panel (`index.html`/`styles.css`/`app.js`),
+  `staticwebapp.config.json`, `README.md`, `deploy.ps1`. Polls `/api/state`
+  every 2 s, per-machine cards (state + sensor values + random toggle +
+  spike/drift/stuck buttons), offline banner when the container is
+  unreachable.
+- `infra/swa.bicep` — Free-SKU Azure Static Web App (validated `bicep build`).
+- `.env.example` — added `SIM_CONTROL_ENABLED/PORT/API_KEY/CORS_ORIGINS`.
+
+Validated locally end-to-end over real HTTP (dry-run sim + uvicorn on
+:8080): healthz up, 3 machines with correct CNC sensors, random toggle
+persists, inject accepted, and `401`/`422`/`404` rejections all correct.
+The FastAPI TestClient suite also passed.
+
+**Manual steps left to the user (NOT done unattended):** the live
+`ca-simulator` container still has NO inbound API. To go live: enable
+external ingress on the control port and set `SIM_CONTROL_ENABLED=1` +
+`SIM_CONTROL_API_KEY` (+ `SIM_CONTROL_CORS_ORIGINS`), then redeploy the
+container and run `webapp/deploy.ps1`. Exact commands are in
+`infra/swa.bicep` and `webapp/README.md`.
+
+Commits this session: `23fefc2`, `91d6eb4` (Task A), `11d4dee`, `82aa841`,
+`a22f9d5`, `19c0284`, `5e19c66`, `f357afd` (Task B).
 
 ## Where we are
 

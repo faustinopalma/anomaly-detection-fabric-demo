@@ -1,8 +1,8 @@
 # Plan
 
-_Last updated: 2026-06-02 (Task A docs/dashboard refresh done; Task B SWA in progress)_
+_Last updated: 2026-06-02 (Task A done; Task B SWA control panel done — live deploy is manual)_
 
-## IN PROGRESS — Task B: Static Web App control panel for the simulator
+## DONE — Task B: Static Web App control panel for the simulator
 
 Goal (user request): add a Static Web App connected to the cloud simulator
 container. The SWA shows each simulated machine's **state** (simple, not
@@ -12,33 +12,37 @@ sends commands to the container; if the container is down (stopped to save
 cost) the SWA shows it and stays inactive.
 
 Architecture decision: the container today is a one-way producer (no inbound
-API). Add a small **FastAPI control server** inside the simulator process
+API). Added a small **FastAPI control server** inside the simulator process
 (background thread) exposing a read-only state snapshot + control endpoints,
 secured with an `X-API-Key` header. A static (no-build) HTML/JS front-end
 hosted on Azure Static Web Apps (free tier) polls `/api/state` and POSTs
 control commands.
 
-Committable sub-steps (each tested + committed):
-1. `control.py` — thread-safe `ControlState` (per-machine random flag +
-   effective prob, manual-injection queue, status snapshot). Unit-testable.
-2. Thread `ControlState` through `run()`/`main()` so the loop honours
-   per-machine random toggles and pops manual injections. Behaviour
-   unchanged when control is absent (back-compat). Local test.
-3. `server.py` — FastAPI app factory (`/healthz`, `GET /api/state`,
-   `POST /api/machines/{id}/random`, `POST /api/machines/{id}/inject`),
-   API-key auth + CORS. Start from `cloud_runner` when
-   `SIM_CONTROL_ENABLED=1` (`SIM_CONTROL_PORT`, `SIM_CONTROL_API_KEY`).
-4. `webapp/` static front-end (state cards + per-machine controls,
-   container-offline banner). Machine-count-agnostic.
-5. `infra/swa.bicep` for Azure Static Web Apps (free) + notes to enable ACA
-   ingress on the control port. Validate with `bicep build`.
-6. Local end-to-end test (run simulator+API locally with a fake/no Event Hub,
-   point the webapp at localhost). Provide deploy scripts but DO NOT trigger
-   paid cloud changes unattended.
+Sub-steps (all tested + committed + pushed):
+1. ✅ `control.py` — thread-safe `ControlState`. Commit `11d4dee`.
+2. ✅ `ControlState` threaded through `run()`/`main()` + `--dry-run`.
+   Commit `82aa841`.
+3. ✅ `server.py` FastAPI app + `cloud_runner` wiring + requirements +
+   `.env.example`. Commit `a22f9d5`.
+4. ✅ `webapp/` static front-end + `staticwebapp.config.json` + README.
+   Commit `19c0284`.
+5. ✅ `infra/swa.bicep` (Free SKU, `bicep build` OK). Commit `5e19c66`.
+6. ✅ `webapp/deploy.ps1` local deploy helper + local e2e test over real
+   HTTP (dry-run sim + uvicorn). Commit `f357afd`.
 
-Constraints: secrets only in `.env` (`.env.example` is the contract);
-`SIM_CONTROL_API_KEY` added there. Live container ingress change is a manual
-step left for the user (never modify live infra unattended).
+**Manual step left for the user (never modify live infra unattended):**
+enable external ingress on `ca-simulator` for `SIM_CONTROL_PORT` and set
+`SIM_CONTROL_ENABLED=1` + `SIM_CONTROL_API_KEY` (+ CORS origins), redeploy
+the container, then run `webapp/deploy.ps1`. Commands documented in
+`infra/swa.bicep` and `webapp/README.md`.
+
+## DONE — Task A: docs & dashboard audit
+
+Confirmed live fleet = 3 machines (M-004 trained-only, not wired live).
+Corrected `README.md`, `docs/architecture.md`,
+`docs/model_architecture_options.md`, `tools/README.md`. Added 3 CNC
+timecharts to `tools/04_create_dashboard.py` and applied to the live
+`rtd_telemetry_live` dashboard. Commits `23fefc2`, `91d6eb4`.
 
 ---
 
