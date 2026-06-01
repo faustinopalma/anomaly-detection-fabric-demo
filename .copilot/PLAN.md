@@ -1,8 +1,30 @@
 # Plan
 
-_Last updated: 2026-05-21_
+_Last updated: 2026-06-01 (M-003 real-data CNC machine added and validated)_
 
-## Phase 1 — Validate the per-machine pipeline (NOW)
+## DONE — 3rd machine (M-003, real-data CNC)
+
+Completed 2026-06-01. A third machine was added from the real CNC data in
+`_data_local/`:
+
+1. Built a recorded CNC profile (`data/cnc_profile_M-003.json`) and a
+   `CNCMachine` simulator path (3 sensors: load/power/torque).
+2. Trained `transformer_ae_small__M-003` (single-file FP16 ONNX,
+   161 419 params, threshold 1.882) and registered it to the live `models`
+   table (version 1).
+3. Wired `fn_score_demo_M003()` into `kql/04_update_policy.kql` and applied
+   it live. Deployed the cloud simulator at `SIM_MACHINES=3` with
+   `SIM_CNC_PROFILE` (revision `ca-simulator--v2606011249`).
+4. Found and fixed the real cause that ingestion had stopped on May 27: the
+   eventstream destination `kql_raw_telemetry` was **Paused**. Resumed via
+   `tools/_check_topology.py`.
+5. Validated end-to-end: M-003 ingests (3 sensors), scores ~1.17 on normal
+   data, and an injected drift produced an anomaly at score 9.79.
+
+Remaining: run a longer live correlation to confirm precision/recall once
+enough natural anomalies accumulate (see STATE Outstanding #1).
+
+## Phase 1 — Validate the per-machine pipeline (historical)
 
 1. Wait ~15 min for fresh `M-001`/`M-002` data to accumulate after the
    simulator restart (revision `ca-simulator--0000001` in

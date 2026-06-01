@@ -5,6 +5,9 @@
 # Untracked working folder for personal docs / scratch artifacts
 _local/
 
+# Local private data folder
+_data_local/
+
 # Fabric CLI cache / token store
 .fab/
 **/.fabric/
