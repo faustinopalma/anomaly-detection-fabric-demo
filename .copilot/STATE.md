@@ -1,6 +1,32 @@
 # Current state
 
-_Last updated: 2026-06-02 (MSAL login fix + fully scripted repeatable deploy)_
+_Last updated: 2026-06-02 (run M-004 in the cloud simulator — 4 machines)_
+
+## Latest session (2026-06-02c) — run M-004 in the cloud simulator (DONE, live)
+
+The control panel showed only 3 machines (M-001..M-003) although 4 models were
+trained (M-001..M-004). Root cause: the live simulator ran `SIM_MACHINES=3`.
+The CNC engine was hard-pinned to the **last** machine (`M-{n:03d}`), so naively
+bumping to 4 would have made **M-004** the CNC and demoted M-003 to a physics
+machine — breaking both models' feature mapping (M-003=3 CNC feats, M-004=8
+physics feats).
+
+Fix — pin the CNC machine explicitly, then bump to 4:
+- `simulator-cloud/src/simulate_machines.py`: new `--cnc-machine-id` flag
+  (also reads `SIM_CNC_MACHINE`), threaded into `build_machines(..., cnc_machine_id=)`.
+- `simulator-cloud/src/cloud_runner.py`: `SIM_CNC_MACHINE` → `--cnc-machine-id`
+  in `_argv_from_env()` (+ docstring).
+- `simulator-cloud/deploy.ps1`: new `-CncMachineId` param (default `M-003`),
+  default `-Machines` bumped 2→4, emits `SIM_CNC_MACHINE`.
+- Built `acrsimnsb7uf.azurecr.io/simulator:m004` (ACR run `nfa`, Succeeded).
+- Redeployed `ca-simulator` (revision `v2606012340`) with `SIM_MACHINES=4`,
+  `SIM_CNC_MACHINE=M-003`, `SIM_CNC_PROFILE=/app/cnc_profile_M-003.json`.
+- **Verified live**: `/api/state` → `machine_count=4`; M-001/M-002/M-004 = 8
+  sensors (physics), M-003 = 3 sensors (CNC, idle).
+
+NOTE: M-004's ONNX model exists on disk (`models/transformer_ae_small__M-004/`)
+but registering it in the KQL `models` table for scoring is a separate step
+(`tools/05_register_model.py` + `kql/02_models.kql`), not done here.
 
 ## Latest session (2026-06-02b) — MSAL login fix + scripted repeatable deploy (DONE, live)
 

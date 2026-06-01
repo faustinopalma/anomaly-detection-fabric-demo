@@ -12,7 +12,9 @@ All knobs are read from environment variables:
   SIM_ANOMALY_PROB    (default 0.0005)
   SIM_BATCH_SIZE      (default 200)
   SIM_CNC_PROFILE     (optional)           path to CNC profile JSON; when set,
-                                           the last machine is the CNC engine
+                                           the CNC engine drives one machine
+  SIM_CNC_MACHINE     (optional)           machine id for the CNC engine
+                                           (default: the last machine)
   SIM_QUIET           (default unset)      set to "1" to suppress per-tick logs
 
 Optional operator control plane (Static Web App backend):
@@ -95,6 +97,7 @@ def _argv_from_env() -> list[str]:
         ("SIM_ANOMALY_PROB", "--anomaly-prob"),
         ("SIM_BATCH_SIZE",   "--batch-size"),
         ("SIM_CNC_PROFILE",  "--cnc-profile"),
+        ("SIM_CNC_MACHINE",  "--cnc-machine-id"),
     ):
         v = os.environ.get(env_key)
         if v:

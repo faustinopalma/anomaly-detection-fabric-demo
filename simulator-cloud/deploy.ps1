@@ -27,10 +27,11 @@ param(
     [string]$EnvName  = "cae-anomalydet",
     [string]$AppName  = "ca-simulator",
     [string]$ImageTag = "latest",
-    [int]   $Machines = 2,
+    [int]   $Machines = 4,
     [double]$Rate     = 1.0,
     [double]$AnomalyProb = 0.0005,
     [string]$CncProfile = "/app/cnc_profile_M-003.json",
+    [string]$CncMachineId = "M-003",
 
     # --- Control plane / auth (optional) -----------------------------------
     # When -EnableControl is set, the container exposes the FastAPI control
@@ -180,6 +181,7 @@ $envVars = @(
     "SIM_ANOMALY_PROB=$AnomalyProb",
     "SIM_CNC_PROFILE=$CncProfile"
 )
+if ($CncMachineId) { $envVars += "SIM_CNC_MACHINE=$CncMachineId" }
 
 # Secrets to (re)apply on every deploy.
 $secrets = @("eventstream-conn=$($env:EVENTSTREAM_CONNECTION_STRING)")

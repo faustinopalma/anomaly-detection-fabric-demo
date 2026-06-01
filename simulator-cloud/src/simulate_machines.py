@@ -593,8 +593,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
     p.add_argument("--cnc-profile", type=str, default=None,
                    help="Path to a CNC profile JSON (e.g. data/cnc_profile_M-003.json). "
-                        "When set, the last machine (M-{machines:03d}) is driven by the "
-                        "real-data-derived CNC engine instead of the FSM physics model.")
+                        "When set, one machine is driven by the real-data-derived CNC "
+                        "engine instead of the FSM physics model.")
+    p.add_argument("--cnc-machine-id", type=str, default=None,
+                   help="Machine id driven by the CNC profile (e.g. M-003). Defaults to "
+                        "the last machine (M-{machines:03d}). Use this to keep the CNC "
+                        "engine on a fixed id while adding more physics machines.")
     p.add_argument("--quiet", action="store_true", help="Suppress per-tick log output.")
     p.add_argument("--dry-run", action="store_true",
                    help="Generate telemetry but do not send it to Event Hubs "
@@ -633,6 +637,7 @@ def main(argv: list[str] | None = None, control: "ControlState | None" = None) -
         pass
 
     cnc_profile = None
+    cnc_machine_id = args.cnc_machine_id or os.environ.get("SIM_CNC_MACHINE")
     cnc_path = args.cnc_profile or os.environ.get("SIM_CNC_PROFILE")
     if cnc_path:
         cnc_path = Path(cnc_path)
@@ -642,9 +647,12 @@ def main(argv: list[str] | None = None, control: "ControlState | None" = None) -
             print(f"ERROR: CNC profile not found: {cnc_path}", file=sys.stderr)
             return 2
         cnc_profile = load_profile(cnc_path)
-        print(f"[sim] CNC profile loaded for M-{args.machines:03d}: {cnc_path.name}")
+        cnc_target = cnc_machine_id or f"M-{args.machines:03d}"
+        print(f"[sim] CNC profile loaded for {cnc_target}: {cnc_path.name}")
 
-    machines = build_machines(args.machines, cnc_profile=cnc_profile)
+    machines = build_machines(
+        args.machines, cnc_profile=cnc_profile, cnc_machine_id=cnc_machine_id
+    )
     if control is not None:
         control.register_machines(machines)
     run(
