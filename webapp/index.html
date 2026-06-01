@@ -9,25 +9,21 @@
 <body>
   <header>
     <h1>Factory simulator &mdash; control panel</h1>
-    <div id="conn-status" class="pill pill-unknown">not connected</div>
+    <div class="header-right">
+      <span id="user-info" class="user-info hidden"></span>
+      <button id="signout-btn" type="button" class="hidden">Sign out</button>
+      <div id="conn-status" class="pill pill-unknown">not connected</div>
+    </div>
   </header>
 
-  <section id="config" class="card">
-    <h2>Connection</h2>
+  <section id="signin" class="card hidden">
+    <h2>Sign in required</h2>
     <p class="hint">
-      Point this at the simulator container's control API. The API key is the
-      shared <code>X-API-Key</code> secret (demo-grade). Values are stored in
-      your browser only.
+      Access is restricted to authorized users in the organization tenant.
+      Sign in with your work account to control the simulator.
     </p>
-    <div class="config-row">
-      <label>API base URL
-        <input id="api-base" type="url" placeholder="https://ca-simulator.&lt;region&gt;.azurecontainerapps.io" />
-      </label>
-      <label>API key
-        <input id="api-key" type="password" placeholder="X-API-Key value" />
-      </label>
-      <button id="connect-btn" type="button">Connect</button>
-    </div>
+    <button id="signin-btn" type="button" class="primary">Sign in with Microsoft</button>
+    <p id="signin-error" class="error hidden"></p>
   </section>
 
   <section id="offline-banner" class="banner hidden">
@@ -50,6 +46,8 @@
     or stuck anomaly manually to show the detector reacting.</span>
   </footer>
 
+  <script src="https://alcdn.msftauth.net/lib/1.4.0/js/msal-browser.min.js" crossorigin="anonymous"></script>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

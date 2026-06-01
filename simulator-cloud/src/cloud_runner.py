@@ -19,8 +19,12 @@ Optional operator control plane (Static Web App backend):
 
   SIM_CONTROL_ENABLED      set to "1" to start the FastAPI control server
   SIM_CONTROL_PORT         (default 8080)
-  SIM_CONTROL_API_KEY      shared secret required in the X-API-Key header
+  SIM_CONTROL_API_KEY      shared secret for the X-API-Key fallback
   SIM_CONTROL_CORS_ORIGINS (optional) comma-separated allowed origins
+  SIM_AUTH_ENABLED         set to "1" to require an Entra ID bearer token
+  SIM_AUTH_TENANT_ID       tenant GUID (required when SIM_AUTH_ENABLED=1)
+  SIM_AUTH_CLIENT_ID       app registration client/audience GUID
+  SIM_AUTH_ALLOW_APIKEY    set to "1" to also accept X-API-Key when auth on
 
 EVENTSTREAM_CONNECTION_STRING must be present in env (injected by ACA
 secret reference at deploy time).
@@ -47,14 +51,21 @@ def _maybe_start_control():
     if not _truthy(os.environ.get("SIM_CONTROL_ENABLED")):
         return None
 
-    api_key = os.environ.get("SIM_CONTROL_API_KEY", "").strip()
-    if not api_key:
-        print("[cloud_runner] SIM_CONTROL_ENABLED set but SIM_CONTROL_API_KEY "
-              "is empty — control plane disabled", flush=True)
-        return None
-
     from control import ControlState
     import server
+
+    validator = server.validator_from_env()
+    allow_api_key = server.allow_api_key_from_env()
+    api_key = os.environ.get("SIM_CONTROL_API_KEY", "").strip()
+
+    # When Entra auth is off we fall back to the shared key, which is then
+    # mandatory. With Entra auth on, the key is optional (only used if
+    # SIM_AUTH_ALLOW_APIKEY=1).
+    if validator is None and not api_key:
+        print("[cloud_runner] SIM_CONTROL_ENABLED set but neither Entra auth "
+              "nor SIM_CONTROL_API_KEY configured — control plane disabled",
+              flush=True)
+        return None
 
     try:
         default_prob = float(os.environ.get("SIM_ANOMALY_PROB", "0.0005"))
@@ -68,8 +79,11 @@ def _maybe_start_control():
         api_key,
         port=port,
         cors_origins=server.cors_origins_from_env(),
+        validator=validator,
+        allow_api_key=allow_api_key,
     )
-    print(f"[cloud_runner] control API listening on :{port}", flush=True)
+    mode = "Entra ID" if validator is not None else "shared key"
+    print(f"[cloud_runner] control API listening on :{port} (auth: {mode})", flush=True)
     return control
 
 

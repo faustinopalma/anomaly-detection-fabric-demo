@@ -1,26 +1,68 @@
 "use strict";
 
 const POLL_MS = 2000;
-const LS_BASE = "sim.apiBase";
-const LS_KEY = "sim.apiKey";
 
 const el = (id) => document.getElementById(id);
-const state = { base: "", key: "", timer: null, busy: new Set() };
+const state = { timer: null, busy: new Set(), account: null };
 
-// ---- config / connection -------------------------------------------------
+// ---- MSAL auth -----------------------------------------------------------
 
-function loadConfig() {
-  state.base = localStorage.getItem(LS_BASE) || "";
-  state.key = localStorage.getItem(LS_KEY) || "";
-  el("api-base").value = state.base;
-  el("api-key").value = state.key;
+const msalApp = new msal.PublicClientApplication({
+  auth: {
+    clientId: CONFIG.clientId,
+    authority: `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: window.location.origin,
+  },
+  cache: { cacheLocation: "localStorage", storeAuthStateInCookie: false },
+});
+
+const TOKEN_REQUEST = { scopes: [CONFIG.scope] };
+
+function showSignedIn(account) {
+  state.account = account;
+  el("signin").classList.add("hidden");
+  el("user-info").classList.remove("hidden");
+  el("user-info").textContent = account.username || account.name || "signed in";
+  el("signout-btn").classList.remove("hidden");
 }
 
-function saveConfig() {
-  state.base = el("api-base").value.trim().replace(/\/+$/, "");
-  state.key = el("api-key").value.trim();
-  localStorage.setItem(LS_BASE, state.base);
-  localStorage.setItem(LS_KEY, state.key);
+function showSignedOut(errorMsg) {
+  state.account = null;
+  if (state.timer) { clearInterval(state.timer); state.timer = null; }
+  el("signin").classList.remove("hidden");
+  el("user-info").classList.add("hidden");
+  el("signout-btn").classList.add("hidden");
+  el("fleet-meta").classList.add("hidden");
+  el("offline-banner").classList.add("hidden");
+  el("machines").innerHTML = "";
+  setConnStatus("unknown", "not connected");
+  const e = el("signin-error");
+  if (errorMsg) { e.textContent = errorMsg; e.classList.remove("hidden"); }
+  else e.classList.add("hidden");
+}
+
+async function getToken() {
+  if (!state.account) throw new Error("not signed in");
+  try {
+    const res = await msalApp.acquireTokenSilent({ ...TOKEN_REQUEST, account: state.account });
+    return res.accessToken;
+  } catch (err) {
+    // Silent acquisition failed (expired/interaction required) → redirect.
+    await msalApp.acquireTokenRedirect(TOKEN_REQUEST);
+    throw err; // redirect navigates away
+  }
+}
+
+async function signIn() {
+  try {
+    await msalApp.loginRedirect(TOKEN_REQUEST);
+  } catch (err) {
+    showSignedOut(`Sign-in failed: ${err.message}`);
+  }
+}
+
+function signOut() {
+  msalApp.logoutRedirect({ account: state.account });
 }
 
 function setConnStatus(kind, text) {
@@ -32,13 +74,13 @@ function setConnStatus(kind, text) {
 // ---- API helpers ---------------------------------------------------------
 
 async function apiFetch(path, opts = {}) {
-  if (!state.base) throw new Error("no API base URL configured");
-  const headers = Object.assign({ "X-API-Key": state.key }, opts.headers || {});
+  const token = await getToken();
+  const headers = Object.assign({ Authorization: "Bearer " + token }, opts.headers || {});
   if (opts.body) headers["Content-Type"] = "application/json";
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 5000);
   try {
-    const res = await fetch(state.base + path, { ...opts, headers, signal: ctrl.signal });
+    const res = await fetch(CONFIG.backendUrl + path, { ...opts, headers, signal: ctrl.signal });
     return res;
   } finally {
     clearTimeout(t);
@@ -192,8 +234,8 @@ async function onInject(id, kind) {
 async function poll() {
   try {
     const res = await apiFetch("/api/state");
-    if (res.status === 401) {
-      goOffline("Unauthorized — check the API key.");
+    if (res.status === 401 || res.status === 403) {
+      goOffline("Access denied — your account is not authorized for this app.");
       return;
     }
     if (!res.ok) {
@@ -232,10 +274,28 @@ function toast(msg, kind = "ok") {
 
 // ---- boot ----------------------------------------------------------------
 
-el("connect-btn").addEventListener("click", () => {
-  saveConfig();
-  startPolling();
-});
+el("signin-btn").addEventListener("click", signIn);
+el("signout-btn").addEventListener("click", signOut);
 
-loadConfig();
-if (state.base) startPolling();
+async function boot() {
+  try {
+    const resp = await msalApp.handleRedirectPromise();
+    if (resp && resp.account) {
+      msalApp.setActiveAccount(resp.account);
+    }
+  } catch (err) {
+    showSignedOut(`Sign-in failed: ${err.message}`);
+    return;
+  }
+  const accounts = msalApp.getAllAccounts();
+  if (accounts.length > 0) {
+    const account = msalApp.getActiveAccount() || accounts[0];
+    msalApp.setActiveAccount(account);
+    showSignedIn(account);
+    startPolling();
+  } else {
+    showSignedOut();
+  }
+}
+
+boot();

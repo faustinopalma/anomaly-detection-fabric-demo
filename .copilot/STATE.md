@@ -2,7 +2,65 @@
 
 _Last updated: 2026-06-02 (docs/dashboard audit + Static Web App control panel deployed live)_
 
-## Latest session (2026-06-02) — docs audit + SWA control panel
+## Latest session (2026-06-02) — Entra ID login on the control panel (DONE, live)
+
+Refactor: removed the manual API-base/X-API-Key entry from the panel, wired
+the backend in permanently, and gated access behind **Microsoft Entra ID
+login**. Only users assigned to the app registration in the tenant can sign
+in and reach the control API; the API now validates a real Entra bearer JWT.
+
+**App registration (tenant `39d764bc-ae80-46f9-b22c-6246cc5a20c2`):**
+- Single-tenant SPA. Client/audience ID `91351088-042c-4d80-a8dd-3983979d70b3`
+  (app object `4ae2e5e2-0100-4449-b591-832dbe9d5db2`, SP
+  `28cec4d0-7493-4b80-b2f5-54b9e909ead5`).
+- Scope `api://91351088-042c-4d80-a8dd-3983979d70b3/access_as_user`
+  (id `b6f3c2a1-7d44-4e6b-9a21-0f8e5c2d1a90`), `requestedAccessTokenVersion: 2`.
+- SPA redirect URIs: the SWA URL + `http://localhost:4280`.
+- `appRoleAssignmentRequired: true` on the SP; **admin user assigned**
+  (default access role). Admin consent pre-granted (oauth2PermissionGrant,
+  AllPrincipals). Azure CLI app pre-authorized for the scope (for token tests).
+- IDs stored git-ignored in `_local/_appreg.txt`.
+
+**Frontend (`webapp/`):**
+- `config.js` (new) — hardcoded `backendUrl`, `tenantId`, `clientId`, `scope`.
+- `index.html` — removed the config card; added header sign-in/out + a
+  "Sign in with Microsoft" card; loads MSAL.js v2 (CDN) → `config.js` → `app.js`.
+- `app.js` — MSAL `PublicClientApplication` (localStorage cache),
+  `loginRedirect`/`acquireTokenSilent`→`acquireTokenRedirect` fallback,
+  `logoutRedirect`; every API call sends `Authorization: Bearer <token>`;
+  401/403 surface "Access denied — not authorized".
+- `styles.css` — header-right / user-info / sign-out / error styles.
+
+**Backend (`simulator-cloud/src/`):**
+- `server.py` — `JwtValidator` (PyJWT `PyJWKClient`, RS256, audience=client id,
+  issuer `.../v2.0`). `create_app(..., validator=None, allow_api_key=True)`;
+  new `require_auth` dependency: Bearer JWT when a validator is set (optional
+  X-API-Key bypass via `allow_api_key`), else legacy X-API-Key. Added
+  `validator_from_env()` / `allow_api_key_from_env()`. `/healthz` stays public.
+- `cloud_runner.py` — builds the validator from env; control plane stays up
+  when Entra auth is on even without a shared key; logs the auth mode.
+- `requirements.txt` — added `pyjwt[crypto]>=2.8`.
+- New env contract: `SIM_AUTH_ENABLED`, `SIM_AUTH_TENANT_ID`,
+  `SIM_AUTH_CLIENT_ID`, `SIM_AUTH_ALLOW_APIKEY` (documented in `.env.example`).
+
+**Live deploy (DONE — user authorized; user owns cost shutdown):**
+- New image `acrsimnsb7uf.azurecr.io/simulator:auth1` (ACR build run `nf9`
+  Succeeded; ignore the cosmetic Windows UnicodeEncodeError in the log stream).
+- `az containerapp update -n ca-simulator -g rg-fabric-demo` → image `auth1`
+  + env `SIM_CONTROL_ENABLED=1`, `SIM_AUTH_ENABLED=1`,
+  `SIM_AUTH_TENANT_ID=39d764bc-…`, `SIM_AUTH_CLIENT_ID=91351088-…`,
+  `SIM_AUTH_ALLOW_APIKEY=0` (shared key disabled). provisioningState Succeeded.
+- Webapp republished via `swa deploy ./webapp --env production`.
+- **Live validation passed:** `/healthz` → 200 (public); `/api/state` with no
+  token → **401** (auth enforced); real Entra token (via
+  `az account get-access-token --scope api://91351088-…/access_as_user`) →
+  **200** with the 3 machines. Local FastAPI auth-dependency suite: 13/13 PASS.
+
+URL (unchanged): `https://jolly-pebble-0d6f26703.7.azurestaticapps.net` —
+now Entra-gated. Backend `https://ca-simulator.thankfulground-943b41a0.italynorth.azurecontainerapps.io`.
+
+## Previous session (2026-06-02) — docs audit + SWA control panel
+
 
 Two user tasks, done one at a time with incremental commits (all pushed).
 
