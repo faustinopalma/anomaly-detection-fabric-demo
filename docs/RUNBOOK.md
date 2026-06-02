@@ -169,7 +169,7 @@ in the workspace; re-runs replace the definition in place.
 > `tools/05_register_model.py models/transformer_ae_small__<MID>`, and
 > scored by `fn_score_demo_M001/M002/M003()` in
 > [`kql/04_update_policy.kql`](../kql/04_update_policy.kql). See
-> [`architecture.md` §2b](architecture.md#2b-current-live-deployment--per-machine-models-3-machines).
+   [`architecture.md` §2b](architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored).
 
 ---
 
@@ -232,3 +232,30 @@ If any check fails, see [`STATE.md`](../.copilot/STATE.md) for the last
 known-good context, [`PLAN.md`](../.copilot/PLAN.md) for outstanding
 work, and [`CONTEXT.md`](../.copilot/CONTEXT.md) for stable facts that
 don't change between sessions.
+
+---
+
+## 13. (Optional) Always-on cloud simulator + control panel
+
+Steps 10–11 cover the **local** simulator. To run the **24/7 cloud**
+simulator (Azure Container App, no telemetry gaps) and the Entra-gated
+operator control panel, deploy the whole stack with the idempotent
+orchestrator:
+
+```pwsh
+pwsh ./scripts/deploy-control-panel.ps1
+```
+
+It (1) deploys the Container App that serves both the telemetry producer and
+the same-origin control panel, (2) creates/updates the Entra app registration
+(redirect URI = the container FQDN), and (3) redeploys the container wired to
+Entra auth. It prints the public URL when done. Requires `EVENTSTREAM_CONNECTION_STRING`
+and the `SIM_*` control-plane vars in `.env` (see
+[`.env.example`](../.env.example)).
+
+The live fleet ingests **4 machines** (`SIM_MACHINES=4`,
+`SIM_CNC_MACHINE=M-003`); **3 are scored** in KQL (M-004 is ingested-only).
+For the container-only deploy and runtime knobs see
+[`simulator-cloud/README.md`](../simulator-cloud/README.md); for the panel
+features (force-state, anomaly inject, 5-minute live chart) see
+[`webapp/README.md`](../webapp/README.md).

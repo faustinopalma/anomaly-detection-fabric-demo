@@ -54,7 +54,7 @@ by Eventhouse on every ingest into `raw_telemetry`, costs ~1× storage thanks
 to bin-row reconciliation, and serves as the Gold-tier wide table the
 multivariate scoring function reads from.
 
-## 2b. Current live deployment — per-machine models (3 machines)
+## 2b. Current live deployment — per-machine models (4 ingested, 3 scored)
 
 > The generic univariate/multivariate design above is the *toolbox*. The
 > **live demo** has converged on a simpler, production-realistic shape:
@@ -62,17 +62,18 @@ multivariate scoring function reads from.
 > threshold (read from the model's `metadata.threshold`). This avoids a
 > single hard-coded `machine=` filter in the scoring path.
 
-The live pipeline scores three machines, each through its own update-policy
-function attached to `anomalies`:
+The cloud simulator **ingests four machines**; **three are scored**, each
+through its own update-policy function attached to `anomalies`:
 
 | Machine | Model name | Sensors | Threshold | Data source |
 |---|---|---|---|---|
 | M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | 1.00679 | simulator physics |
 | M-002 | `transformer_ae_small__M-002` | 8 (synthetic) | 0.98171 | simulator physics |
 | M-003 | `transformer_ae_small__M-003` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 1.88170 | **real CNC profile** (`data/cnc_profile_M-003.json`) |
+| M-004 | — (ingested, **not scored**) | 8 (synthetic) | — | simulator physics |
 
-- Each model is a `TransformerAE` (WINDOW=64) exported to FP16 ONNX so it
-  fits the Kusto 1 MB row budget. M-003 has 3 input features
+- Each scored model is a `TransformerAE` (WINDOW=64) exported to FP16 ONNX so
+  it fits the Kusto 1 MB row budget. M-003 has 3 input features
   (161 419 params); M-001/M-002 have 8.
 - Scoring functions `fn_score_demo_M001/M002/M003()` live in
   [`kql/04_update_policy.kql`](../kql/04_update_policy.kql) and all attach to
@@ -80,15 +81,43 @@ function attached to `anomalies`:
   `score_multivariate_onnx_batch(model_name=…, machine=…, bin=1s,
   threshold=<from metadata>)`.
 - The cloud simulator (Container App `ca-simulator` in `rg-fabric-demo`)
-  runs `SIM_MACHINES=3` and drives M-003 from the recorded CNC profile via
+  runs `SIM_MACHINES=4` with the CNC machine pinned explicitly via
+  `SIM_CNC_MACHINE=M-003` (so adding M-004 as a 4th physics machine does not
+  move the CNC role) and drives M-003 from the recorded CNC profile via
   `SIM_CNC_PROFILE=/app/cnc_profile_M-003.json` (a `CNCMachine` path in
   `simulator-cloud/src/simulate_machines.py`).
-- To add another machine: train with `tools/train_per_machine.py`, register
-  with `tools/05_register_model.py models/<dir>`, add a
+- **M-004 is ingested but not scored.** Its ONNX model exists on disk
+  (`models/transformer_ae_small__M-004/`, a cloud-vs-local training
+  benchmark) but is **not** registered in the KQL `models` table, so M-004
+  produces telemetry with no detections.
+- To **score** another machine: train with `tools/train_per_machine.py`,
+  register with `tools/05_register_model.py models/<dir>`, add a
   `fn_score_demo_<MID>()` function + a policy entry in
-  `kql/04_update_policy.kql`, apply with
-  `tools/02_setup_kql_tables.py kql/04_update_policy.kql`, and bump
-  `SIM_MACHINES`.
+  `kql/04_update_policy.kql`, and apply with
+  `tools/02_setup_kql_tables.py kql/04_update_policy.kql`. To **ingest**
+  another machine, bump `SIM_MACHINES`.
+
+### Control panel (operator UI)
+
+The same Container App also serves a small **operator control panel**
+(static `webapp/` + a same-origin FastAPI control API in
+`simulator-cloud/src/server.py`), gated behind **Microsoft Entra ID** login
+(SPA app registration; only assigned users can sign in). From the panel an
+operator can:
+
+- watch each machine's live **state** and latest sensor values,
+- **force** a machine's state (pin any FSM state, or **Auto** to release
+  back to the autonomous state machine; the CNC machine has no forcible
+  states),
+- toggle per-machine **random anomalies** and **inject** a `spike` /
+  `drift` / `stuck` anomaly,
+- view a **client-side 5-minute live chart** built entirely from the
+  existing `/api/state` poll (no extra backend stream; pausable; auto-pauses
+  on a hidden tab and stops when the page closes).
+
+The control API and panel are off by default and add no load to the
+telemetry path. See [`webapp/README.md`](../webapp/README.md) and
+[`simulator-cloud/README.md`](../simulator-cloud/README.md).
 
 
 ## 3. Items provisioned by `scripts/deploy.ps1`

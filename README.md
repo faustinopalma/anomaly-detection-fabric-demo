@@ -11,26 +11,40 @@ multiple sensors), trains a window-based model offline, exports it to
 live telemetry are surfaced on a Fabric **Real-Time Dashboard**
 (`rtd_telemetry_live`).
 
-## Current live architecture (3 machines)
+## Current live architecture (4 machines ingested, 3 scored)
 
 The demo has converged on a **production-realistic, per-machine** shape:
 one dedicated ONNX model per machine, each with its own scaler and
 threshold (read from the model's `metadata.threshold`) — no single
 hard-coded `machine=` filter in the scoring path.
 
-| Machine | Model | Sensors | Data source |
+The always-on cloud simulator **ingests four machines**; **three of them are
+scored** by a dedicated in-KQL model. M-004 is ingested as an extra physics
+machine but its model is not registered for scoring (see note below).
+
+| Machine | Model (scoring) | Sensors | Data source |
 |---|---|---|---|
 | M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | simulator physics |
 | M-002 | `transformer_ae_small__M-002` | 8 (synthetic) | simulator physics |
 | M-003 | `transformer_ae_small__M-003` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | recorded real CNC profile |
+| M-004 | — (ingested, not scored) | 8 (synthetic) | simulator physics |
 
 Live pipeline: **always-on cloud simulator** (Azure Container App,
-`SIM_MACHINES=3`) → Eventstream `es_machines` → KQL `raw_telemetry` →
-per-machine update-policy functions `fn_score_demo_M001/M002/M003` →
-`anomalies` → Real-Time Dashboard `rtd_telemetry_live`.
+`SIM_MACHINES=4`, `SIM_CNC_MACHINE=M-003`) → Eventstream `es_machines` →
+KQL `raw_telemetry` → per-machine update-policy functions
+`fn_score_demo_M001/M002/M003` → `anomalies` → Real-Time Dashboard
+`rtd_telemetry_live`.
+
+The same Container App also serves an **Entra ID–gated control panel**
+(same-origin FastAPI + static `webapp/`) to watch live state, force a
+machine's state, toggle/inject anomalies, and view a client-side 5-minute
+live chart — see [`webapp/README.md`](webapp/README.md).
 
 > `models/transformer_ae_small__M-004/` is a trained **benchmark** model
-> (cloud-vs-local comparison) and is **not** wired into the live fleet.
+> (cloud-vs-local comparison). It is ingested by the simulator as a 4th
+> physics machine but **not** registered in the KQL `models` table, so it
+> produces telemetry without detections. Wiring it for scoring is a separate
+> step (`tools/05_register_model.py` + a `fn_score_demo_M004()` policy entry).
 
 ## Documentation
 
@@ -46,6 +60,8 @@ Read in this order, depending on what you want:
 | [`docs/model_architecture_options.md`](docs/model_architecture_options.md) | Model-family options (AE variants) and the tradeoffs behind the chosen TransformerAE. |
 | [`docs/model_deployment_options.md`](docs/model_deployment_options.md) | Where/how to run the ONNX model (in-KQL, Spark, local) and the deployment tradeoffs. |
 | [`docs/cloud_vs_local_training_comparison.md`](docs/cloud_vs_local_training_comparison.md) | Azure ML GPU vs local CPU training benchmark (M-004). |
+| [`simulator-cloud/README.md`](simulator-cloud/README.md) | Always-on simulator on Azure Container Apps (24/7, no-gap telemetry) + optional Entra-gated control API. |
+| [`webapp/README.md`](webapp/README.md) | Entra ID–gated operator control panel: live state, force-state, anomaly inject, 5-minute live chart. |
 | [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream, run KQL scripts, register models, build the dashboard. |
 
 ## Prerequisites

@@ -1,6 +1,26 @@
 # Current state
 
-_Last updated: 2026-06-02 (forced machine state + client-side 5-min live chart; live)_
+_Last updated: 2026-06-02 (docs audit: 4 ingested/3 scored + control panel)_
+
+## Latest session (2026-06-02f) — docs audit & refresh (DONE)
+
+Aligned all documentation with the live state (4 machines ingested, 3 scored)
+and documented the new control panel.
+- `README.md`: "3 machines" → "4 ingested, 3 scored" table + M-004
+  ingested-not-scored note; `SIM_MACHINES=4`/`SIM_CNC_MACHINE=M-003`; added
+  control-panel + simulator-cloud doc rows.
+- `docs/architecture.md` §2b: heading + body to 4 ingested/3 scored; new
+  "Control panel (operator UI)" subsection (Entra, force-state, inject,
+  client-side chart). Anchor changed → fixed the RUNBOOK link.
+- `webapp/README.md`: full rewrite — same-origin Container App + Entra login
+  (was SWA + browser API key); endpoint table incl. `/api/machines/{id}/state`;
+  5-min client-side chart section; local-run + `deploy-control-panel.ps1`.
+- `simulator-cloud/README.md`: default `-Machines 4 -CncMachineId M-003`; new
+  "Control panel (optional)" env-var table + orchestrator.
+- `tools/README.md`: local-fleet example → 4 machines `--cnc-machine-id M-003`.
+- `.env.example`: control-plane wording SWA → same-origin panel.
+- `docs/RUNBOOK.md`: new §13 (optional) always-on cloud sim + control panel.
+- No code changes; concepts.md/KQL cookbook unchanged (still accurate).
 
 ## Latest session (2026-06-02e) — force state + client-side chart (DONE, live)
 

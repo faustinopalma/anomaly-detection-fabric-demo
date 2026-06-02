@@ -68,8 +68,8 @@ pip install -r simulator-local/requirements.txt
 # infinite (Ctrl-C to stop)
 python simulator-local/simulate_machines.py
 
-# Reproduce the live cloud fleet: 3 machines, last one (M-003) driven by the CNC profile
-python simulator-local/simulate_machines.py --machines 3 --cnc-profile data/cnc_profile_M-003.json
+# Reproduce the live cloud fleet: 4 machines, M-003 driven by the CNC profile
+python simulator-local/simulate_machines.py --machines 4 --cnc-machine-id M-003 --cnc-profile data/cnc_profile_M-003.json
 
 # 10 machines, 5 samples/sec/sensor, 2 minutes, more frequent anomalies
 python simulator-local/simulate_machines.py --machines 10 --rate 5 --duration 120 --anomaly-prob 0.002

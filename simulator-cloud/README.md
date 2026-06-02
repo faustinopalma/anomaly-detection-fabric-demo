@@ -42,13 +42,47 @@ Main knobs (all optional):
 ```pwsh
 pwsh ./simulator-cloud/deploy.ps1 `
     -Location northeurope `
-    -Machines 10 -Rate 2 -AnomalyProb 0.001 `
+    -Machines 4 -CncMachineId M-003 -Rate 2 -AnomalyProb 0.001 `
     -ImageTag v2
 ```
+
+Defaults: `-Machines 4` with the CNC machine pinned to `-CncMachineId M-003`
+(so M-004 is added as a 4th physics machine without moving the CNC role).
+The live fleet ingests 4 machines; 3 are scored in KQL (M-004 is
+ingested-only — see [`../docs/architecture.md` §2b](../docs/architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored)).
 
 To tweak only the runtime parameters without rebuilding the image,
 just rerun the script: it updates the env-vars on the existing
 container app (no rebuild).
+
+## Control panel (optional)
+
+The container can also serve an **Entra ID–gated operator control panel**
+same-origin (the static `webapp/` baked into the image + the FastAPI control
+API in `src/server.py`). It exposes machine state, force-state, anomaly
+toggle/inject and a client-side live chart. It is **off by default** and adds
+no load to the telemetry path.
+
+Relevant env vars (see [`../.env.example`](../.env.example) for the full
+contract):
+
+| Var | Purpose |
+| --- | --- |
+| `SIM_CONTROL_ENABLED` | `1` turns the control API + panel on |
+| `SIM_CONTROL_PORT` | port the control API listens on (must match ingress) |
+| `SIM_AUTH_ENABLED` | `1` requires an Entra bearer token (preferred) |
+| `SIM_AUTH_TENANT_ID` / `SIM_AUTH_CLIENT_ID` | tenant + SPA app-registration GUIDs |
+| `SIM_AUTH_ALLOW_APIKEY` | `1` also accepts the `SIM_CONTROL_API_KEY` (testing) |
+| `SIM_CONTROL_API_KEY` | shared secret for the X-API-Key fallback |
+
+For a one-shot, idempotent deploy of the whole panel stack (container +
+Entra app registration + Entra-gated redeploy) use the orchestrator:
+
+```pwsh
+pwsh ./scripts/deploy-control-panel.ps1
+```
+
+See [`../webapp/README.md`](../webapp/README.md) for the panel itself.
 
 ## Operations
 
