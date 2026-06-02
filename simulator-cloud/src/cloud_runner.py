@@ -83,6 +83,7 @@ def _maybe_start_control():
         cors_origins=server.cors_origins_from_env(),
         validator=validator,
         allow_api_key=allow_api_key,
+        web_dir=server.web_dir_from_env(),
     )
     mode = "Entra ID" if validator is not None else "shared key"
     print(f"[cloud_runner] control API listening on :{port} (auth: {mode})", flush=True)

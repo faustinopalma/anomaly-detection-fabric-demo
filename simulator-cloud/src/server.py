@@ -1,13 +1,17 @@
 """FastAPI control server for the simulator.
 
-Runs in a background thread next to the simulator loop and exposes a small
-HTTP API consumed by the Static Web App:
+Runs in a background thread next to the simulator loop. It serves the static
+control panel (same-origin, no separate Static Web App) and a small HTTP API:
 
 * ``GET  /healthz``                       — liveness, no auth
+* ``GET  /config.js``                     — public front-end config, no auth
 * ``GET  /api/state``                     — fleet snapshot (auth)
 * ``POST /api/machines/{id}/random``      — {"enabled": bool} (auth)
 * ``POST /api/machines/{id}/inject``      — {"kind": "spike|drift|stuck",
                                              "sensor": "<optional>"} (auth)
+
+The control panel (``index.html`` / ``app.js`` / ``styles.css`` / MSAL) is
+mounted at ``/`` from ``web_dir`` (``SIM_WEB_DIR``, default ``/app/webapp``).
 
 Auth modes:
 
@@ -26,11 +30,27 @@ from __future__ import annotations
 import os
 import threading
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from control import ControlState, VALID_KINDS
+
+# Content-Security-Policy tuned for the control panel: everything same-origin
+# except the MSAL sign-in flow, which talks to login.microsoftonline.com.
+_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "connect-src 'self' https://login.microsoftonline.com; "
+    "frame-src https://login.microsoftonline.com; "
+    "form-action 'self' https://login.microsoftonline.com; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'"
+)
 
 
 class RandomBody(BaseModel):
@@ -73,16 +93,31 @@ def create_app(
     cors_origins: list[str] | None = None,
     validator: JwtValidator | None = None,
     allow_api_key: bool = True,
+    web_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Simulator control API", version="2.0.0")
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins or ["*"],
-        allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-    )
+    # CORS is only needed when the panel is served from a different origin
+    # (e.g. a separate Static Web App). When the webapp is served from this
+    # same container (web_dir set) requests are same-origin and no CORS
+    # headers are required, so we keep the middleware off by default.
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "OPTIONS"],
+            allow_headers=["*"],
+        )
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        resp = await call_next(request)
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Content-Security-Policy", _CSP)
+        return resp
 
     def require_auth(
         authorization: str | None = Header(default=None),
@@ -110,6 +145,28 @@ def create_app(
     def healthz() -> dict:
         return {"status": "ok", "machine_count": control.snapshot()["machine_count"]}
 
+    @app.get("/config.js")
+    def config_js() -> Response:
+        """Front-end runtime config, served same-origin so the panel needs no
+        build-time generation. clientId / tenantId / scope are public values
+        (not secrets); the API itself stays gated by the bearer token."""
+        client_id = os.environ.get("SIM_AUTH_CLIENT_ID", "").strip()
+        tenant_id = os.environ.get("SIM_AUTH_TENANT_ID", "").strip()
+        scope = os.environ.get("SIM_AUTH_SCOPE", "").strip() or (
+            f"api://{client_id}/access_as_user" if client_id else ""
+        )
+        js = (
+            '"use strict";\n'
+            "// Served by the simulator control API (same origin).\n"
+            "const CONFIG = {\n"
+            '  backendUrl: "",\n'
+            f'  tenantId: "{tenant_id}",\n'
+            f'  clientId: "{client_id}",\n'
+            f'  scope: "{scope}",\n'
+            "};\n"
+        )
+        return Response(content=js, media_type="application/javascript")
+
     @app.get("/api/state", dependencies=[Depends(require_auth)])
     def get_state() -> dict:
         return control.snapshot()
@@ -135,6 +192,12 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown machine {machine_id}")
         return {"machine_id": machine_id, "queued": {"kind": body.kind, "sensor": body.sensor}}
 
+    # Serve the control panel from this same container (same-origin). Mounted
+    # last so the explicit API/config routes above take precedence. Skipped
+    # when the directory is absent (e.g. API-only local runs).
+    if web_dir and os.path.isdir(web_dir):
+        app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
+
     return app
 
 
@@ -147,6 +210,7 @@ def serve_in_thread(
     cors_origins: list[str] | None = None,
     validator: JwtValidator | None = None,
     allow_api_key: bool = True,
+    web_dir: str | None = None,
 ) -> threading.Thread:
     """Start uvicorn on a daemon thread and return it. Imports uvicorn lazily
     so the simulator has no hard dependency on it when control is disabled."""
@@ -158,6 +222,7 @@ def serve_in_thread(
         cors_origins=cors_origins,
         validator=validator,
         allow_api_key=allow_api_key,
+        web_dir=web_dir,
     )
     config = uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False)
     server = uvicorn.Server(config)
@@ -189,3 +254,10 @@ def validator_from_env() -> JwtValidator | None:
 
 def allow_api_key_from_env() -> bool:
     return os.environ.get("SIM_AUTH_ALLOW_APIKEY", "0").strip() in ("1", "true", "True")
+
+
+def web_dir_from_env() -> str | None:
+    """Directory of the static control panel to serve same-origin. Defaults to
+    /app/webapp (baked into the image); returns None when unset."""
+    d = os.environ.get("SIM_WEB_DIR", "/app/webapp").strip()
+    return d or None

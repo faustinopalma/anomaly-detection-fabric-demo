@@ -27,6 +27,7 @@ param(
     [string]$EnvName  = "cae-anomalydet",
     [string]$AppName  = "ca-simulator",
     [string]$ImageTag = "latest",
+    [switch]$SkipBuild,
     [int]   $Machines = 4,
     [double]$Rate     = 1.0,
     [double]$AnomalyProb = 0.0005,
@@ -149,13 +150,27 @@ if (-not $AcrName) {
 # 4. Build image (remote build via ACR Tasks — no local Docker needed)
 # ---------------------------------------------------------------------------
 $image = "$AcrName.azurecr.io/simulator:$ImageTag"
-Write-Host "[deploy] az acr build -> $image (this is the longest step, ~3-5 min on first build)" -ForegroundColor Cyan
-Push-Location $PSScriptRoot
-try {
-    az acr build --registry $AcrName --image "simulator:$ImageTag" --file Dockerfile .
-    if ($LASTEXITCODE -ne 0) { throw "acr build failed" }
-} finally {
-    Pop-Location
+if ($SkipBuild) {
+    Write-Host "[deploy] -SkipBuild set; reusing existing image $image" -ForegroundColor Yellow
+} else {
+    # Stage the control panel into the build context so the image can serve it
+    # same-origin (no Static Web App). Only the runtime assets are shipped.
+    $webStage = Join-Path $PSScriptRoot "webapp"
+    if (Test-Path $webStage) { Remove-Item -Recurse -Force $webStage }
+    Copy-Item -Recurse -Force (Join-Path $repoRoot "webapp") $webStage
+    foreach ($drop in @("config.js", "staticwebapp.config.json", "deploy.ps1", "README.md")) {
+        Remove-Item -Force (Join-Path $webStage $drop) -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "[deploy] az acr build -> $image (this is the longest step, ~3-5 min on first build)" -ForegroundColor Cyan
+    Push-Location $PSScriptRoot
+    try {
+        az acr build --registry $AcrName --image "simulator:$ImageTag" --file Dockerfile .
+        if ($LASTEXITCODE -ne 0) { throw "acr build failed" }
+    } finally {
+        Pop-Location
+        Remove-Item -Recurse -Force $webStage -ErrorAction SilentlyContinue
+    }
 }
 
 # ---------------------------------------------------------------------------

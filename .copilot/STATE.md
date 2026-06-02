@@ -1,6 +1,40 @@
 # Current state
 
-_Last updated: 2026-06-02 (run M-004 in the cloud simulator — 4 machines)_
+_Last updated: 2026-06-02 (serve control panel from the Container App; SWA removed)_
+
+## Latest session (2026-06-02d) — same-origin panel, SWA deleted (DONE, live)
+
+Collapsed the two-origin setup (Static Web App + Container App) into a single
+same-origin Container App for the single-user demo. The FastAPI control server
+now serves the static panel and a dynamic `/config.js`, so there is one public
+URL, one redirect URI, and no CORS.
+
+- `simulator-cloud/src/server.py`: `create_app(web_dir=...)` mounts `webapp/`
+  at `/` via `StaticFiles(html=True)` AFTER the API routes; new public
+  `GET /config.js` emits `{backendUrl:"", tenantId, clientId, scope}` from env;
+  `@app.middleware` adds `X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, and a MSAL-tuned `Content-Security-Policy`; CORS is now
+  conditional (off by default). New `web_dir_from_env()` (`SIM_WEB_DIR`,
+  default `/app/webapp`); `serve_in_thread(web_dir=...)`.
+- `simulator-cloud/src/cloud_runner.py`: passes `web_dir=server.web_dir_from_env()`.
+- `simulator-cloud/Dockerfile`: `COPY webapp/ /app/webapp/` + `ENV SIM_WEB_DIR`.
+- `simulator-cloud/deploy.ps1`: stages repo `webapp/` into the build context
+  before `az acr build` (drops SWA-only files); new `-SkipBuild` switch.
+- `scripts/deploy-control-panel.ps1`: rewritten to a 3-step same-origin flow
+  (bootstrap container → app-reg with the container URL → redeploy with auth).
+  Dropped the SWA + webapp-publish steps and `-SwaName/-SwaLocation`.
+- **Removed**: `webapp/config.js`, `webapp/staticwebapp.config.json`,
+  `webapp/deploy.ps1`, `infra/swa.bicep`; `.gitignore` ignores the staged
+  `simulator-cloud/webapp/`.
+- Built `acrsimnsb7uf.azurecr.io/simulator:web1` (ACR run `nfb`, Succeeded);
+  redeployed `ca-simulator` (revision `v2606020819`).
+- App-reg SPA redirect URIs replaced with the container URL +
+  `http://localhost:8080`.
+- **Deleted the Azure SWA** `swa-anomaly-sim` (confirmed gone).
+- **Verified live**: `GET /` → panel HTML 200 (`X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`); `GET /config.js` → 200, correct clientId/tenantId,
+  `application/javascript`, CSP present; `/healthz` 200; `/api/state` 401
+  without token. Panel URL = the container FQDN.
 
 ## Latest session (2026-06-02c) — run M-004 in the cloud simulator (DONE, live)
 

@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    One-shot, repeatable deploy of the entire control-panel stack:
-      1. Static Web App (infra/swa.bicep)            -> public URL
-      2. Entra ID app registration + sign-in gating  -> client id / scope
-      3. Container App control API (Entra-protected)  -> backend FQDN
-      4. webapp/ publish (config.js generated, MSAL vendored)
+    One-shot, repeatable deploy of the entire control-panel stack — now served
+    end-to-end from the Container App (no Static Web App):
+      1. Container App control API + static panel (external ingress) -> FQDN
+      2. Entra ID app registration + sign-in gating (redirect = the FQDN)
+      3. Container App redeploy wired to the app registration (Entra-gated)
 
     Every step is idempotent — safe to re-run after any change. No manual
     portal steps are required.
@@ -14,22 +14,24 @@
     The resource group is discovered from the Fabric capacity unless -RgName
     is supplied.
 
+    The control panel (webapp/) is baked into the container image and served
+    same-origin by the FastAPI control server, so there is a single public URL
+    and a single redirect URI to register.
+
 .EXAMPLE
     pwsh ./scripts/deploy-control-panel.ps1
 
 .EXAMPLE
-    pwsh ./scripts/deploy-control-panel.ps1 -ImageTag auth2 -RgName rg-fabric-demo
+    pwsh ./scripts/deploy-control-panel.ps1 -ImageTag web1 -RgName rg-fabric-demo
 #>
 [CmdletBinding()]
 param(
     [string]$RgName,
     [string]$Location,
-    [string]$SwaName     = "swa-anomaly-sim",
-    [string]$SwaLocation = "westeurope",
     [string]$AppName     = "ca-simulator",
-    [string]$ImageTag    = "auth1",
+    [string]$ImageTag    = "web1",
     [string]$AppDisplayName = "Anomaly Sim Control Panel",
-    [int]   $Machines    = 3,
+    [int]   $Machines    = 4,
     [switch]$AllowApiKey
 )
 
@@ -59,67 +61,63 @@ if (-not $RgName -or -not $Location) {
 Write-Host "[stack] resource group: $RgName ($Location)" -ForegroundColor Green
 
 # ==========================================================================
-# 1. Static Web App (create/reuse) -> public URL (needed for redirect URI)
+# 1. Ensure the Container App exists (so we know its public FQDN for the
+#    redirect URI). On first run we bootstrap-create it (build + external
+#    ingress, no auth yet); on re-runs we reuse the existing FQDN.
 # ==========================================================================
-az extension add --name staticwebapp --upgrade --only-show-errors 2>$null | Out-Null
-Write-Host "[stack] (1/4) ensuring Static Web App '$SwaName'" -ForegroundColor Cyan
-az deployment group create -g $RgName `
-    --template-file (Join-Path $root "infra/swa.bicep") `
-    --parameters name=$SwaName location=$SwaLocation --only-show-errors | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "swa.bicep deployment failed" }
-$swaHost = az staticwebapp show -n $SwaName -g $RgName --query "defaultHostname" -o tsv
-$swaUrl  = "https://$swaHost"
-Write-Host "[stack] SWA: $swaUrl" -ForegroundColor Green
+$backendFqdn = az containerapp show -g $RgName -n $AppName `
+    --query "properties.configuration.ingress.fqdn" -o tsv 2>$null
+$bootstrapped = $false
+if (-not $backendFqdn) {
+    Write-Host "[stack] (1/3) bootstrapping container app '$AppName' to obtain its FQDN" -ForegroundColor Cyan
+    & (Join-Path $root "simulator-cloud/deploy.ps1") `
+        -RgName $RgName -AppName $AppName -ImageTag $ImageTag -Machines $Machines `
+        -EnableControl
+    $backendFqdn = az containerapp show -g $RgName -n $AppName `
+        --query "properties.configuration.ingress.fqdn" -o tsv
+    $bootstrapped = $true
+} else {
+    Write-Host "[stack] (1/3) reusing existing container app FQDN" -ForegroundColor Green
+}
+$backendUrl = "https://$backendFqdn"
+Write-Host "[stack] panel/backend: $backendUrl" -ForegroundColor Green
 
 # ==========================================================================
-# 2. App registration + sign-in gating -> client id / scope
+# 2. App registration + sign-in gating (redirect URI = the container URL)
 # ==========================================================================
-Write-Host "[stack] (2/4) configuring app registration" -ForegroundColor Cyan
+Write-Host "[stack] (2/3) configuring app registration" -ForegroundColor Cyan
 $appreg = & (Join-Path $PSScriptRoot "setup-app-registration.ps1") `
     -DisplayName $AppDisplayName `
-    -SpaRedirectUris @($swaUrl, "http://localhost:4280") `
+    -SpaRedirectUris @($backendUrl, "http://localhost:8080") `
     -TenantId $env:FABRIC_TENANT_ID
 $clientId = $appreg.ClientId
 $scope    = $appreg.Scope
 
 # ==========================================================================
-# 3. Container App control API (Entra-protected) -> backend FQDN
+# 3. Redeploy the container wired to Entra auth. Skip the rebuild only when we
+#    just built the image in the bootstrap step above.
 # ==========================================================================
-Write-Host "[stack] (3/4) deploying container control API" -ForegroundColor Cyan
+Write-Host "[stack] (3/3) wiring Entra auth onto the container" -ForegroundColor Cyan
 $ctrlArgs = @{
-    RgName       = $RgName
-    AppName      = $AppName
-    ImageTag     = $ImageTag
-    Machines     = $Machines
+    RgName        = $RgName
+    AppName       = $AppName
+    ImageTag      = $ImageTag
+    Machines      = $Machines
     EnableControl = $true
-    AuthTenantId = $env:FABRIC_TENANT_ID
-    AuthClientId = $clientId
-    CorsOrigins  = $swaUrl
+    AuthTenantId  = $env:FABRIC_TENANT_ID
+    AuthClientId  = $clientId
 }
+if ($bootstrapped) { $ctrlArgs.SkipBuild = $true }
 if ($AllowApiKey -and $env:SIM_CONTROL_API_KEY) {
     $ctrlArgs.AuthAllowApiKey = $true
     $ctrlArgs.ControlApiKey   = $env:SIM_CONTROL_API_KEY
 }
 & (Join-Path $root "simulator-cloud/deploy.ps1") @ctrlArgs
-$backendFqdn = az containerapp show -g $RgName -n $AppName `
-    --query "properties.configuration.ingress.fqdn" -o tsv
-$backendUrl  = "https://$backendFqdn"
-Write-Host "[stack] backend: $backendUrl" -ForegroundColor Green
-
-# ==========================================================================
-# 4. Publish the webapp (config.js generated, MSAL vendored)
-# ==========================================================================
-Write-Host "[stack] (4/4) publishing webapp" -ForegroundColor Cyan
-& (Join-Path $root "webapp/deploy.ps1") `
-    -RgName $RgName -Name $SwaName -Location $SwaLocation `
-    -BackendUrl $backendUrl -ContainerApp $AppName `
-    -TenantId $env:FABRIC_TENANT_ID -ClientId $clientId -Scope $scope
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
-Write-Host " Control panel deployed (Entra-gated)." -ForegroundColor Green
-Write-Host "   Panel:    $swaUrl" -ForegroundColor Yellow
-Write-Host "   Backend:  $backendUrl" -ForegroundColor Yellow
+Write-Host " Control panel deployed (Entra-gated, served from the container)." -ForegroundColor Green
+Write-Host "   Panel:    $backendUrl" -ForegroundColor Yellow
 Write-Host "   ClientId: $clientId" -ForegroundColor Yellow
 Write-Host "   Scope:    $scope" -ForegroundColor Yellow
 Write-Host " Only assigned tenant users can sign in." -ForegroundColor Yellow

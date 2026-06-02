@@ -53,3 +53,6 @@ data/eval/telemetry_wide.parquet
 # Local scratch / dumps
 _*.txt
 
+# Control panel staged into the container build context by deploy.ps1
+simulator-cloud/webapp/
+
