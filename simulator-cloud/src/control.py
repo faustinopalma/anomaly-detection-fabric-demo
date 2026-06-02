@@ -41,6 +41,8 @@ class _MachineEntry:
     sensor_names: list[str]
     random_enabled: bool
     anomaly_prob: float
+    valid_states: list[str] = field(default_factory=list)
+    forced_state: str | None = None
     queue: Deque[InjectionRequest] = field(default_factory=deque)
     # Published status (updated by the sim loop each tick)
     state: str = "unknown"
@@ -70,6 +72,7 @@ class ControlState:
                     sensor_names=list(getattr(m, "sensor_names", [])),
                     random_enabled=self._default_prob > 0.0,
                     anomaly_prob=self._default_prob,
+                    valid_states=list(getattr(m, "valid_states", [])),
                 )
 
     def effective_anomaly_prob(self, machine_id: str) -> float:
@@ -88,6 +91,13 @@ class ControlState:
             if e is None or not e.queue:
                 return None
             return e.queue.popleft()
+
+    def forced_state(self, machine_id: str) -> str | None:
+        """Operator-forced FSM state for this machine, or None when the machine
+        should follow its own state machine (auto)."""
+        with self._lock:
+            e = self._machines.get(machine_id)
+            return e.forced_state if e is not None else None
 
     def update_status(
         self,
@@ -118,6 +128,27 @@ class ControlState:
             if e is None:
                 return False
             e.random_enabled = bool(enabled)
+            return True
+
+    def set_forced_state(self, machine_id: str, state: str | None) -> bool:
+        """Force the machine into ``state`` (one of its ``valid_states``), or
+        pass None to return it to automatic FSM control. Returns False if the
+        machine is unknown. Raises ValueError on an unsupported state."""
+        with self._lock:
+            e = self._machines.get(machine_id)
+            if e is None:
+                return False
+            if state is not None:
+                if not e.valid_states:
+                    raise ValueError(
+                        f"{machine_id} does not support forcing a state"
+                    )
+                if state not in e.valid_states:
+                    raise ValueError(
+                        f"unknown state {state!r} for {machine_id}; "
+                        f"valid: {e.valid_states}"
+                    )
+            e.forced_state = state
             return True
 
     def request_injection(
@@ -154,6 +185,8 @@ class ControlState:
                     "active_anomaly": e.active_anomaly,
                     "pending_injections": len(e.queue),
                     "sensors": e.sensor_names,
+                    "valid_states": e.valid_states,
+                    "forced_state": e.forced_state,
                     "last_sample": e.last_sample,
                     "updated_at": e.updated_at,
                     "stale_s": round(now - e.updated_at, 1) if e.updated_at else None,

@@ -197,6 +197,7 @@ class Machine:
     state: State = State.OFF
     state_elapsed_s: float = 0.0
     state_dwell_s: float = field(default_factory=lambda: pick_dwell(State.OFF))
+    forced_state: State | None = None
 
     # Physical state
     load_actual: float = 0.0
@@ -222,11 +223,17 @@ class Machine:
     k_rpm_droop: float = 0.05
 
     def step(self, dt: float) -> None:
-        self.state_elapsed_s += dt
-        if self.state_elapsed_s >= self.state_dwell_s:
-            self.state = pick_next_state(self.state)
+        if self.forced_state is not None:
+            # Operator override: pin the FSM to the requested state and keep
+            # the dwell timer from ever expiring so it stays put.
+            self.state = self.forced_state
             self.state_elapsed_s = 0.0
-            self.state_dwell_s = pick_dwell(self.state)
+        else:
+            self.state_elapsed_s += dt
+            if self.state_elapsed_s >= self.state_dwell_s:
+                self.state = pick_next_state(self.state)
+                self.state_elapsed_s = 0.0
+                self.state_dwell_s = pick_dwell(self.state)
 
         target = STATE_SPECS[self.state].target_load
         tau = self.tau_load_ramp if self.state in (
@@ -247,6 +254,21 @@ class Machine:
     @property
     def sensor_names(self) -> list[str]:
         return list(SENSOR_NAMES)
+
+    @property
+    def valid_states(self) -> list[str]:
+        return [s.value for s in State]
+
+    def set_forced_state(self, state: str | None) -> None:
+        """Pin the FSM to ``state`` (a State value) or None to resume auto."""
+        if state is None:
+            if self.forced_state is not None:
+                # Resume the dwell timer from a fresh window in the held state.
+                self.forced_state = None
+                self.state_elapsed_s = 0.0
+                self.state_dwell_s = pick_dwell(self.state)
+            return
+        self.forced_state = State(state)
 
     def is_active(self) -> bool:
         return self.state != State.OFF
@@ -337,6 +359,15 @@ class CNCMachine:
     @property
     def sensor_names(self) -> list[str]:
         return list(self._sensor_names)
+
+    @property
+    def valid_states(self) -> list[str]:
+        # The CNC engine is profile-driven and has no operator-forceable FSM.
+        return []
+
+    def set_forced_state(self, state: str | None) -> None:
+        # No-op: CNC machine does not support state forcing.
+        return
 
     def is_active(self) -> bool:
         return self._eng.active
@@ -489,6 +520,8 @@ def run(
                 events: list[dict] = []
 
                 for machine_id, m in machines.items():
+                    if control is not None:
+                        m.set_forced_state(control.forced_state(machine_id))
                     m.step(interval)
                     s = m.sample()
 

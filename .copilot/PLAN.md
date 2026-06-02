@@ -1,8 +1,46 @@
 # Plan
 
-_Last updated: 2026-06-02 (Task A done; Task B SWA control panel done + deployed live)_
+_Last updated: 2026-06-02 (forced-state + client-side live chart — DONE, live)_
+
+## DONE — Forced machine state + client-side 5-min live chart
+
+User requests (Italian):
+1. OFF/IDLE are not random glitches — they are normal FSM operating-cycle
+   states. Make the state **operator-controllable** (force a state, with an
+   "Auto" option that returns to the FSM).
+2. A **5-minute live chart** of machine values on the panel, **without
+   excessive load** — must stop when the browser closes and be pausable
+   (standby).
+
+Design decision: the chart is built **entirely client-side** from the data
+already returned by the existing `/api/state` poll (which already includes
+`last_sample` per machine). No new server→browser stream → zero extra backend
+load; it stops on page close (polling stops) and is pausable. Also auto-pauses
+when the browser tab is hidden.
+
+Changes (code complete, compiles; control.py logic unit-tested):
+- ✅ `simulator-cloud/src/control.py` — `_MachineEntry.forced_state` +
+  `valid_states`; `set_forced_state()` (validates / None=auto), loop-side
+  `forced_state()`; both exposed in `snapshot()`.
+- ✅ `simulator-cloud/src/simulate_machines.py` — `Machine.forced_state`
+  field + `set_forced_state()` + `valid_states` (pins FSM state in `step()`);
+  `CNCMachine` no-op + empty `valid_states`; `run()` applies the override
+  each tick before `m.step()`.
+- ✅ `simulator-cloud/src/server.py` — `StateBody` + `POST
+  /api/machines/{id}/state` (422 on bad state, 404 unknown machine).
+- ✅ `webapp/` — per-card "Force state" `<select>` (hidden for CNC M-003);
+  header **Charts** toggle + **Pause** standby button; per-card `<canvas>`
+  rolling 5-min chart fed from the poll; auto-pause on tab hidden.
+  Files: `index.html`, `app.js`, `styles.css`.
+
+Pending:
+- ✅ Built image `simulator:web2` (ACR run `nfc`), redeployed `ca-simulator`
+  revision `0000005`, verified live (healthz/panel/app.js assets +
+  `/api/machines/{id}/state` 401 gated).
+- [ ] Commit (Conventional Commits) + push.
 
 ## DONE — Task B: Static Web App control panel for the simulator
+
 
 Goal (user request): add a Static Web App connected to the cloud simulator
 container. The SWA shows each simulated machine's **state** (simple, not

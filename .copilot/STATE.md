@@ -1,6 +1,42 @@
 # Current state
 
-_Last updated: 2026-06-02 (serve control panel from the Container App; SWA removed)_
+_Last updated: 2026-06-02 (forced machine state + client-side 5-min live chart; live)_
+
+## Latest session (2026-06-02e) — force state + client-side chart (DONE, live)
+
+Two operator features on the same-origin control panel.
+
+**1. Force machine state.** OFF/IDLE are normal FSM operating-cycle states
+(not random glitches); added an operator override.
+- `simulator-cloud/src/control.py`: `_MachineEntry.forced_state` +
+  `valid_states`; `set_forced_state(id, state|None)` (validates against the
+  machine's valid states, None=auto), loop-side `forced_state(id)`; both
+  exposed in `snapshot()`.
+- `simulator-cloud/src/simulate_machines.py`: `Machine.forced_state` field +
+  `set_forced_state()` + `valid_states` (8 State values); `step()` pins the
+  state when forced; `CNCMachine` (M-003) no-op + empty `valid_states`;
+  `run()` applies `control.forced_state(id)` each tick before `m.step()`.
+- `simulator-cloud/src/server.py`: `StateBody` + `POST
+  /api/machines/{id}/state` (422 bad state, 404 unknown machine).
+
+**2. Client-side 5-min live chart.** Built ENTIRELY from the existing
+`/api/state` poll (already returns `last_sample`), so zero extra backend load;
+stops on page close (polling stops) and is pausable. Auto-pauses on hidden tab.
+- `webapp/index.html`: header **Charts** toggle + **Pause** (standby) buttons.
+- `webapp/app.js`: per-card "Force state" `<select>` (hidden for CNC) →
+  `onForceState`; rolling per-machine history (5-min window) fed from the poll;
+  `<canvas>` line chart (`drawChart`, per-sensor autoscale, devicePixelRatio);
+  `setChartsOn`/`setPaused`; `visibilitychange` auto-standby.
+- `webapp/styles.css`: `.force-state`, `button.ghost`, `.chart-wrap`,
+  `.chart`, `.chart-legend`.
+
+- Built `acrsimnsb7uf.azurecr.io/simulator:web2` (ACR run `nfc`, Succeeded);
+  redeployed `ca-simulator` (revision `0000005`).
+- **Verified live**: `/healthz` 200 (machine_count=4); `GET /` panel 200 and
+  contains `charts-btn`/`pause-btn`; `/app.js` contains `force-state` +
+  `CHART_WINDOW_MS`; `POST /api/machines/M-001/state` → 401 without token
+  (auth-gated). `control.py` forced-state logic unit-tested (set/validate/
+  reject/release/unknown).
 
 ## Latest session (2026-06-02d) — same-origin panel, SWA deleted (DONE, live)
 

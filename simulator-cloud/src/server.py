@@ -62,6 +62,11 @@ class InjectBody(BaseModel):
     sensor: str | None = None
 
 
+class StateBody(BaseModel):
+    # None / null returns the machine to automatic FSM control.
+    state: str | None = None
+
+
 class JwtValidator:
     """Validates Entra ID v2.0 access tokens against the tenant JWKS."""
 
@@ -191,6 +196,16 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail=f"unknown machine {machine_id}")
         return {"machine_id": machine_id, "queued": {"kind": body.kind, "sensor": body.sensor}}
+
+    @app.post("/api/machines/{machine_id}/state", dependencies=[Depends(require_auth)])
+    def set_state(machine_id: str, body: StateBody) -> dict:
+        try:
+            ok = control.set_forced_state(machine_id, body.state)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not ok:
+            raise HTTPException(status_code=404, detail=f"unknown machine {machine_id}")
+        return {"machine_id": machine_id, "forced_state": body.state}
 
     # Serve the control panel from this same container (same-origin). Mounted
     # last so the explicit API/config routes above take precedence. Skipped
