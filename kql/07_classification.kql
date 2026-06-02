@@ -103,6 +103,47 @@
 }
 
 .create-or-alter function with (folder='analytics',
+        docstring='Per-machine Precision / Recall / F1 over a lookback window (one row per machine)')
+    fn_correlation_metrics_by_machine(match_grace:timespan=2m, lookback:timespan=2h) {
+    let det_stats = fn_classify_detections(match_grace, lookback)
+        | summarize TP_det = countif(label == 'TP'), FP = countif(label == 'FP')
+            by machine_id;
+    let inj_stats = fn_classify_injections(match_grace, lookback)
+        | summarize TP_inj = countif(label == 'TP'), FN = countif(label == 'FN'),
+                    median_latency_s = percentile(latency_s, 50),
+                    p90_latency_s    = percentile(latency_s, 90)
+            by machine_id;
+    det_stats
+    | join kind=fullouter inj_stats on machine_id
+    | extend machine_id = coalesce(machine_id, machine_id1)
+    | extend TP_det = coalesce(TP_det, 0), FP = coalesce(FP, 0),
+             TP_inj = coalesce(TP_inj, 0), FN = coalesce(FN, 0)
+    | extend
+        precision = iff((TP_det + FP) > 0,
+                        round(100.0 * todouble(TP_det) / todouble(TP_det + FP), 1),
+                        real(null)),
+        recall    = iff((TP_inj + FN) > 0,
+                        round(100.0 * todouble(TP_inj) / todouble(TP_inj + FN), 1),
+                        real(null))
+    | extend
+        f1 = iff(isnotnull(precision) and isnotnull(recall) and (precision + recall) > 0,
+                 round(2.0 * precision * recall / (precision + recall), 1),
+                 real(null))
+    | project
+        ['Machine']                  = machine_id,
+        ['TP (matched detections)']  = TP_det,
+        ['FP (spurious detections)'] = FP,
+        ['TP (matched injections)']  = TP_inj,
+        ['FN (missed injections)']   = FN,
+        ['Precision %']              = precision,
+        ['Recall %']                 = recall,
+        ['F1 %']                     = f1,
+        ['Median latency s']         = round(median_latency_s, 2),
+        ['P90 latency s']            = round(p90_latency_s, 2)
+    | order by ['Machine'] asc
+}
+
+.create-or-alter function with (folder='analytics',
         docstring='Detection rate breakdown: TP/FP per minute and per machine')
     fn_classification_breakdown(match_grace:timespan=2m, lookback:timespan=2h, bin_size:timespan=1m) {
     fn_classify_detections(match_grace, lookback)

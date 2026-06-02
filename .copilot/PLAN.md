@@ -1,6 +1,32 @@
 # Plan
 
-_Last updated: 2026-06-02 (forced-state + client-side live chart — DONE, live)_
+_Last updated: 2026-06-02 (per-machine model-quality metrics — DEPLOYED)_
+
+## DONE — Per-machine model-quality metrics on the Fabric dashboard
+
+User request (Italian): every machine on the dashboard must show model-quality
+metrics (P/R/F1). We can compute them because the simulator can emit the
+injected-anomaly type. Fix the simulator for M-003/M-004 (note: marker emission
+was actually missing on ALL machines, not just 3/4).
+
+Code complete (compiles) and DEPLOYED to Fabric (user-confirmed):
+- ✅ `tools/eval_offline.py` (new) — offline supervised eval; labeled synthetic
+  data + ONNX scoring + numpy metrics; results in `data/eval/offline_metrics.json`.
+- ✅ `simulator-local/` + `simulator-cloud/` — emit `__inject__<kind>:<sensor>`
+  markers (value=duration_s, quality=-1) on every overlay start, all machines.
+- ✅ `kql/04_update_policy.kql` — `fn_score_demo_M004()` + 4th update-policy entry.
+- ✅ `kql/07_classification.kql` — `fn_correlation_metrics_by_machine()` (one row
+  per machine).
+- ✅ `tools/04_create_dashboard.py` — `Q_METRICS_BY_MACHINE` + "Model quality by
+  machine" table tile; subsequent tiles shifted down +6.
+
+Deployed (2026-06-02, user-confirmed "confermo"):
+- ✅ Registered M-004 model: `tools/05_register_model.py models/transformer_ae_small__M-004/` (Kusto `models` v1, fp16).
+- ✅ Redeployed KQL 04/07 via `tools/02_setup_kql_tables.py`.
+- ✅ Pushed the new dashboard tile via `tools/04_create_dashboard.py`.
+- ✅ Redeployed cloud simulator: ACR `simulator:web3` → `ca-simulator` revision
+  `v2606021618` (Single, healthy, machine_count=4) — markers now live for all machines.
+- ✅ Committed (Conventional Commits) + pushed.
 
 ## DONE — Forced machine state + client-side 5-min live chart
 

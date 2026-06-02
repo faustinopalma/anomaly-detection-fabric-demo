@@ -196,6 +196,11 @@ Q_METRICS = """\
 fn_correlation_metrics(2m, _endTime - _startTime)
 """
 
+Q_METRICS_BY_MACHINE = """\
+fn_correlation_metrics_by_machine(2m, _endTime - _startTime)
+| where isempty(['_machine']) or ['Machine'] == ['_machine']
+"""
+
 Q_TPFP_TIMELINE = """\
 fn_classify_detections(2m, _endTime - _startTime)
 | where isempty(['_machine']) or machine_id == ['_machine']
@@ -327,22 +332,25 @@ def build_dashboard(workspace_id: str, database_id: str, cluster_uri: str, datab
         tile("Precision / Recall / F1",
              "TP/FP/FN with precision, recall, F1 and detection latency",
              0, 42, 24, 3, "multistat", Q_METRICS, multistat_opts),
+        tile("Model quality by machine",
+             "Per-machine precision / recall / F1 / latency for ALL machines (M-001..M-004)",
+             0, 45, 24, 6, "table", Q_METRICS_BY_MACHINE, table_opts),
         tile("TP vs FP over time",
              "Per-minute count of true-positive vs false-positive detections",
-             0, 45, 12, 7, "line", Q_TPFP_TIMELINE, line_opts),
+             0, 51, 12, 7, "line", Q_TPFP_TIMELINE, line_opts),
         tile("False negatives (missed injections)",
              "Injections with no detection inside [start_ts .. expected_end_ts + 2m]",
-             12, 45, 12, 7, "table", Q_FN_TABLE, table_opts),
+             12, 51, 12, 7, "table", Q_FN_TABLE, table_opts),
         tile("False positives (spurious detections)",
              "Detections outside any injection window",
-             0, 52, 24, 7, "table", Q_FP_TABLE, table_opts),
+             0, 58, 24, 7, "table", Q_FP_TABLE, table_opts),
         # --- CNC (M-003) sensor charts: only machines with these sensors show ---
         tile("Spindle load [%] (CNC)", "mandrino_load — avg per machine, 10s bins",
-             0, 59, 8, 7, "line", Q_CNC_LOAD, line_opts),
+             0, 65, 8, 7, "line", Q_CNC_LOAD, line_opts),
         tile("Spindle power [kW] (CNC)", "mandrino_power — avg per machine, 10s bins",
-             8, 59, 8, 7, "line", Q_CNC_POWER, line_opts),
+             8, 65, 8, 7, "line", Q_CNC_POWER, line_opts),
         tile("Spindle torque [N*cm] (CNC)", "mandrino_torque — avg per machine, 10s bins",
-             16, 59, 8, 7, "line", Q_CNC_TORQUE, line_opts),
+             16, 65, 8, 7, "line", Q_CNC_TORQUE, line_opts),
     ]
     tiles = [t for t, _q in tiles_and_queries]
     queries = [q for _t, q in tiles_and_queries]

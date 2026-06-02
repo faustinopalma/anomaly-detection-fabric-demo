@@ -540,15 +540,18 @@ def run(
 
                     # Operator-requested manual injection takes priority over
                     # the random overlay and fires regardless of machine state.
+                    ov_started = False
                     if ov is None and control is not None:
                         req = control.pop_injection(machine_id)
                         if req is not None:
                             ov = manual_overlay(now, req.kind, req.sensor, m.sensor_names)
                             active[machine_id] = ov
+                            ov_started = True
 
                     if ov is None and m.is_active() and random.random() < prob:
                         ov = maybe_trigger_overlay(now, m.sensor_names)
                         active[machine_id] = ov
+                        ov_started = True
 
                     if ov is not None:
                         ov_quality = ov.apply(s, now)
@@ -578,6 +581,21 @@ def run(
                             "ts":         ts_iso,
                             "value":      round(float(value), 4),
                             "quality":    q,
+                        })
+
+                    # Ground-truth marker: emit one synthetic row at overlay
+                    # onset (random or operator-requested) so KQL
+                    # (fn_extract_injections) can populate injected_anomalies
+                    # and compute per-machine quality metrics. Encoded as
+                    # sensor_id=__inject__<kind>:<sensor>, value=duration_s,
+                    # quality=-1.0. Applies to every machine in the fleet.
+                    if ov_started:
+                        events.append({
+                            "machine_id": machine_id,
+                            "sensor_id":  f"__inject__{ov.kind}:{ov.sensor}",
+                            "ts":         ts_iso,
+                            "value":      round(float(ov.duration), 4),
+                            "quality":    -1.0,
                         })
 
                 for chunk in chunked(events, batch_size):

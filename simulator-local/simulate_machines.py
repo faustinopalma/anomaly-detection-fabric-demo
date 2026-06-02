@@ -442,9 +442,11 @@ def run(
                     if ov is not None and now >= ov.until:
                         active.pop(machine_id, None)
                         ov = None
+                    ov_started = False
                     if ov is None and m.is_active() and random.random() < anomaly_prob:
                         ov = maybe_trigger_overlay(now, m.sensor_names)
                         active[machine_id] = ov
+                        ov_started = True
 
                     if ov is not None:
                         ov_quality = ov.apply(s, now)
@@ -460,6 +462,21 @@ def run(
                             "ts":         ts_iso,
                             "value":      round(float(value), 4),
                             "quality":    q,
+                        })
+
+                    # Ground-truth marker: emit one synthetic row at overlay
+                    # onset so KQL (fn_extract_injections) can populate
+                    # injected_anomalies and compute per-machine quality
+                    # metrics. Encoded as sensor_id=__inject__<kind>:<sensor>,
+                    # value=duration_s, quality=-1.0. Applies to every machine
+                    # (FSM physics M-001/M-002/M-004 and CNC M-003).
+                    if ov_started:
+                        events.append({
+                            "machine_id": machine_id,
+                            "sensor_id":  f"__inject__{ov.kind}:{ov.sensor}",
+                            "ts":         ts_iso,
+                            "value":      round(float(ov.duration), 4),
+                            "quality":    -1.0,
                         })
 
                 for chunk in chunked(events, batch_size):

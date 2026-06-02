@@ -1,6 +1,63 @@
 # Current state
 
-_Last updated: 2026-06-02 (docs audit: 4 ingested/3 scored + control panel)_
+_Last updated: 2026-06-02 (per-machine quality metrics: marker emit + M-004 scoring + dashboard tile — DEPLOYED)_
+
+## Latest session (2026-06-02) — per-machine model-quality metrics (DEPLOYED to Fabric)
+
+Goal (Italian): the Fabric dashboard must show model-quality metrics (P/R/F1)
+for **all** machines, using simulator-emitted injected-anomaly-type labels.
+Fix the simulator for M-003/M-004 (the marker emission was actually missing on
+every machine, not just 3/4 — user recollection corrected).
+
+**Offline eval (DONE).** `tools/eval_offline.py` (new) generates labeled
+synthetic telemetry by reusing repo engines (`cnc_engine` for M-003,
+`generate_and_train.generate_wide` for others), injects plausible anomalies
+(spike/drift/stuck anchored to per-sensor std), scores ONNX, computes
+precision/recall/F1, confusion matrix, ROC-AUC, PR-AUC (hand-rolled numpy, no
+sklearn) + episode-level recall. Never touches Fabric. Results saved to
+`data/eval/offline_metrics.json`. 6h/60-episode run: M-003 P=1.000 R=0.122
+F1=0.218 ROC-AUC=0.833; M-004 P=0.513 R=0.184 F1=0.270 ROC-AUC=0.740. Low
+window-level recall is methodological (64-tick mean barely moves for short
+spikes); episode-level recall is the meaningful figure.
+
+**Marker emission (DONE).** Both `simulator-local/simulate_machines.py` and
+`simulator-cloud/src/simulate_machines.py` now append a marker event whenever
+an overlay starts (`ov_started`), for ALL machines (FSM + CNC):
+`sensor_id="__inject__<kind>:<sensor>"`, `value=duration_s`, `quality=-1.0`.
+The KQL side (`kql/05_injections.kql`) ALREADY had the consumer:
+`fn_extract_injections()` + an update policy fanning markers into
+`injected_anomalies`, and `telemetry_clean()` filtering them out. So the
+simulator was the only missing link.
+
+**M-004 scoring (DONE, code).** `kql/04_update_policy.kql`: added
+`fn_score_demo_M004()` (copy of M003 with machine='M-004', model
+'transformer_ae_small__M-004', threshold from metadata) + a 4th entry in the
+`anomalies` update policy. Header comment updated to list M-004.
+
+**Per-machine metrics (DONE, code).** `kql/07_classification.kql`: added
+`fn_correlation_metrics_by_machine(match_grace=2m, lookback=2h)` — one row per
+machine (P/R/F1 + median/p90 latency) via fullouter join of det_stats +
+inj_stats with coalesce. `tools/04_create_dashboard.py`: added
+`Q_METRICS_BY_MACHINE` + a full-width "Model quality by machine" table tile
+(y=45, h=6); shifted the tiles below it down by +6.
+
+**DEPLOYED (2026-06-02, user-confirmed "confermo").** Live env changes applied:
+- M-004 model registered into Kusto `models` (v1, fp16) via
+  `tools/05_register_model.py models/transformer_ae_small__M-004/`.
+- KQL redeployed: `kql/04_update_policy.kql` (+ `fn_score_demo_M004`, 4th
+  update-policy entry) and `kql/07_classification.kql`
+  (+ `fn_correlation_metrics_by_machine`) via `tools/02_setup_kql_tables.py`.
+- Dashboard `rtd_telemetry_live` pushed with the new "Model quality by machine"
+  tile via `tools/04_create_dashboard.py`.
+- Cloud simulator redeployed: ACR image `acrsimnsb7uf.azurecr.io/simulator:web3`
+  built + pushed; Container App `ca-simulator` (rg `rg-fabric-demo`,
+  `italynorth`) now runs revision `ca-simulator--v2606021618` (Single mode,
+  RunningAtMaxScale, `/healthz` → `{"status":"ok","machine_count":4}`). All 4
+  machines now emit `__inject__` markers.
+- Validated: `fn_correlation_metrics_by_machine` returns live rows; M-004
+  scoring exercised via `tools/inject_anomaly.py --machine M-004`. M-003/M-004
+  per-machine metrics populate as live markers accrue.
+All edits compile (py_compile OK).
 
 ## Latest session (2026-06-02f) — docs audit & refresh (DONE)
 
