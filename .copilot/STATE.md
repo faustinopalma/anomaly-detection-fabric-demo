@@ -1,8 +1,44 @@
 # Current state
 
-_Last updated: 2026-06-03 (control panel rewritten in React + Recharts — REDEPLOYED, image web5)_
+_Last updated: 2026-06-03 (server-side chart history + reconnect backfill — REDEPLOYED, image web6)_
 
-## Latest session (2026-06-03) — control-panel rewrite to React + Recharts (DEPLOYED)
+## Latest session (2026-06-03) — server-side telemetry history for the charts (DEPLOYED)
+
+Goal (user): injected anomalies weren't visible in the dashboard, and leaving
+the browser in the background caused gaps/jumps in the charts. Fix: persist a
+rolling per-sensor history **server-side** and feed the charts from it, so the
+charts capture every sample at the simulator tick rate (1 Hz, not just the 2 s
+poll) and a reconnect backfills the entire window. Done and **redeployed**.
+
+**Server (`simulator-cloud/src/`):**
+- `control.py` — `_MachineEntry` gains a `history: Deque[(epoch_s, {sensor:
+  value})]`; `update_status` appends each tick and trims to
+  `history_window_s` (default 300 s, new keyword on `ControlState.__init__`).
+  New `ControlState.history(since)` returns columnar `{machines:[{machine_id,
+  t:[...], series:{sensor:[...]}}]}` with only samples newer than `since`.
+- `server.py` — new `GET /api/history?since=<epoch_s>` (auth-gated). `since`=0
+  (or omitted) backfills the whole retained window; otherwise incremental.
+
+**Client (`webapp/src/`):**
+- `api/client.ts` — `getHistory(since=0)`.
+- `types.ts` — `HistoryResponse`/`MachineHistory`; `FleetSnapshot.server_time?`.
+- `hooks/useFleet.ts` — rewritten: still polls `/api/state` every 2 s for the
+  snapshot, but charts now come from `/api/history`. Keeps a `sinceRef`
+  high-water mark for incremental fetches; on (re)activation (incl. returning
+  from a hidden tab) it resets `sinceRef=0` + clears rings → next fetch
+  backfills the full window (no jumps). Server timestamps are aligned to the
+  local clock via an offset so the 5-min `Date.now()` window lines up.
+
+`npm run build` passes (tsc + vite). **Redeployed:** ACR image
+`acrsimnsb7uf.azurecr.io/simulator:web6` (build `nfj`, Succeeded), Container App
+`ca-simulator` revision `ca-simulator--v2606031733` active + 100% traffic
+(`/healthz` → `{status:ok,machine_count:4}`; `/api/history` → 401 gated, route
+wired). Redeploy gotcha unchanged: stage `webapp/` into `simulator-cloud/webapp`
+(robocopy, exclude `node_modules`/`dist`/tsbuildinfo), `az acr build --no-logs`,
+then `deploy.ps1 -ImageTag web6 -SkipBuild -RgName rg-fabric-demo -Location
+italynorth`, then remove the staged dir.
+
+## Earlier session (2026-06-03) — control-panel rewrite to React + Recharts (DEPLOYED)
 
 Goal (Italian): separate charts (one per sensor, fixed height each → machines
 with more sensors get a taller column), numbered X/Y axes, zero always visible,

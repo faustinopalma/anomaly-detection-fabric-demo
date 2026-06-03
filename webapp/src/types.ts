@@ -23,7 +23,22 @@ export interface Machine {
 export interface FleetSnapshot {
   machine_count: number;
   uptime_s: number;
+  server_time?: number;
   machines: Machine[];
+}
+
+// Columnar per-sensor history from GET /api/history. `t` holds epoch-second
+// timestamps; each `series[sensor]` array is parallel to `t`.
+export interface MachineHistory {
+  machine_id: string;
+  t: number[];
+  series: Record<string, (number | null)[]>;
+}
+
+export interface HistoryResponse {
+  server_time: number;
+  window_s: number;
+  machines: MachineHistory[];
 }
 
 export type InjectKind = "spike" | "drift" | "stuck";

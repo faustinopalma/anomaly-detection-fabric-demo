@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ApiClient } from "../api/client";
-import type { ConnStatus, FleetSnapshot } from "../types";
+import type { ConnStatus, FleetSnapshot, HistoryResponse } from "../types";
 
 const POLL_MS = 2000;
-// Rolling client-side chart window, built entirely from the /api/state poll
-// (no extra server stream), so it adds zero backend load.
+// Chart window. Must match the server-side retention (history_window_s) so a
+// reconnect can backfill the full visible range.
 const CHART_WINDOW_MS = 5 * 60 * 1000;
 
 export interface SeriesPoint {
@@ -13,7 +13,7 @@ export interface SeriesPoint {
   v: number | null;
 }
 
-interface History {
+interface Ring {
   t: number[];
   s: Record<string, (number | null)[]>;
 }
@@ -27,8 +27,11 @@ interface FleetState {
 }
 
 /**
- * Poll the control API on an interval while `active`, exposing the latest
- * fleet snapshot plus a rolling per-sensor history for the charts.
+ * Poll the control API while `active`. The fleet snapshot drives the controls;
+ * the charts are fed from the server-side history endpoint so they stay
+ * continuous and capture every sample at the simulator's tick rate (not just
+ * the 2 s poll). Timestamps come from the server, so backgrounding the tab and
+ * returning simply backfills the whole window — no gaps or jumps.
  */
 export function useFleet(
   client: ApiClient | null,
@@ -39,33 +42,48 @@ export function useFleet(
   const [status, setStatus] = useState<ConnStatus>("unknown");
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [offlineDetail, setOfflineDetail] = useState("");
-  const historyRef = useRef<Map<string, History>>(new Map());
+  // Per-machine rolling history in client-adjusted ms. Mutated in place; a
+  // counter bump triggers re-render so the charts pick up new points.
+  const ringRef = useRef<Map<string, Ring>>(new Map());
+  // High-water mark (server epoch seconds) of the newest sample we hold, used
+  // as `since` for incremental fetches. 0 forces a full-window backfill.
+  const sinceRef = useRef(0);
+  const [, setTick] = useState(0);
 
-  const accumulate = useCallback((snap: FleetSnapshot) => {
-    const now = Date.now();
-    const cutoff = now - CHART_WINDOW_MS;
-    for (const m of snap.machines) {
-      let h = historyRef.current.get(m.machine_id);
-      if (!h) {
-        h = { t: [], s: {} };
-        historyRef.current.set(m.machine_id, h);
+  const mergeHistory = useCallback((h: HistoryResponse, full: boolean) => {
+    // Align server timestamps to the local clock so the chart's "now" window
+    // (Date.now based) lines up regardless of clock skew.
+    const offset = Date.now() - h.server_time * 1000;
+    const cutoff = Date.now() - CHART_WINDOW_MS;
+    let maxT = full ? 0 : sinceRef.current;
+
+    for (const m of h.machines) {
+      let ring = ringRef.current.get(m.machine_id);
+      if (!ring || full) {
+        ring = { t: [], s: {} };
+        ringRef.current.set(m.machine_id, ring);
       }
-      const sample = m.last_sample ?? {};
-      const names = m.sensors?.length ? m.sensors : Object.keys(sample);
-      h.t.push(now);
-      for (const n of names) {
-        if (!h.s[n]) h.s[n] = [];
-        const v = sample[n];
-        h.s[n].push(v === undefined || v === null ? null : Number(v));
+      const n = m.t.length;
+      for (let i = 0; i < n; i++) {
+        const ts = m.t[i];
+        if (ts > maxT) maxT = ts;
+        ring.t.push(ts * 1000 + offset);
+        for (const sensor of Object.keys(m.series)) {
+          if (!ring.s[sensor]) ring.s[sensor] = [];
+          const v = m.series[sensor][i];
+          ring.s[sensor].push(v == null ? null : Number(v));
+        }
       }
-      // Drop samples older than the window.
+      // Drop points older than the window.
       let drop = 0;
-      while (drop < h.t.length && h.t[drop] < cutoff) drop++;
+      while (drop < ring.t.length && ring.t[drop] < cutoff) drop++;
       if (drop > 0) {
-        h.t.splice(0, drop);
-        for (const key of Object.keys(h.s)) h.s[key].splice(0, drop);
+        ring.t.splice(0, drop);
+        for (const key of Object.keys(ring.s)) ring.s[key].splice(0, drop);
       }
     }
+    sinceRef.current = maxT;
+    setTick((x) => x + 1);
   }, []);
 
   useEffect(() => {
@@ -76,6 +94,10 @@ export function useFleet(
 
     let cancelled = false;
     setStatus("connecting");
+    // Fresh activation (incl. returning from a hidden tab): backfill the full
+    // window on the next history fetch.
+    sinceRef.current = 0;
+    ringRef.current.clear();
 
     const poll = async () => {
       try {
@@ -93,11 +115,19 @@ export function useFleet(
         }
         const snap = (await res.json()) as FleetSnapshot;
         if (cancelled) return;
-        if (chartsOn) accumulate(snap);
         setSnapshot(snap);
         setStatus("online");
         setLastUpdated(Date.now());
         setOfflineDetail("");
+
+        if (chartsOn) {
+          const full = sinceRef.current === 0;
+          const hres = await client.getHistory(sinceRef.current);
+          if (cancelled || !hres.ok) return;
+          const hist = (await hres.json()) as HistoryResponse;
+          if (cancelled) return;
+          mergeHistory(hist, full);
+        }
       } catch {
         if (cancelled) return;
         setStatus("offline");
@@ -113,19 +143,22 @@ export function useFleet(
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, active, chartsOn, accumulate]);
+  }, [client, active, chartsOn, mergeHistory]);
 
   // Clear accumulated history when charts are switched off.
   useEffect(() => {
-    if (!chartsOn) historyRef.current.clear();
+    if (!chartsOn) {
+      ringRef.current.clear();
+      sinceRef.current = 0;
+    }
   }, [chartsOn]);
 
   const getSeries = useCallback((machineId: string, sensor: string): SeriesPoint[] => {
-    const h = historyRef.current.get(machineId);
-    if (!h) return [];
-    const arr = h.s[sensor];
+    const ring = ringRef.current.get(machineId);
+    if (!ring) return [];
+    const arr = ring.s[sensor];
     if (!arr) return [];
-    return h.t.map((t, i) => ({ t, v: arr[i] ?? null }));
+    return ring.t.map((t, i) => ({ t, v: arr[i] ?? null }));
   }, []);
 
   return { snapshot, status, lastUpdated, offlineDetail, getSeries };

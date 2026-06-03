@@ -36,6 +36,12 @@ export class ApiClient {
     return this.request("/api/state");
   }
 
+  /** Rolling per-sensor history. `since` (epoch seconds) fetches only newer
+   * samples; 0 backfills the whole retained window. */
+  async getHistory(since = 0): Promise<Response> {
+    return this.request(`/api/history?since=${encodeURIComponent(since)}`);
+  }
+
   async setRandom(machineId: string, enabled: boolean): Promise<Response> {
     return this.request(`/api/machines/${machineId}/random`, {
       method: "POST",

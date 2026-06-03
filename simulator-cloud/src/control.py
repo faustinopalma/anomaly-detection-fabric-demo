@@ -50,15 +50,25 @@ class _MachineEntry:
     last_sample: dict[str, float] = field(default_factory=dict)
     active_anomaly: str | None = None
     updated_at: float = 0.0
+    # Rolling per-sensor history at the simulator tick rate, so the control
+    # panel can render continuous charts and backfill the whole window after
+    # a client disconnect. Each item is (epoch_seconds, {sensor: value}).
+    history: Deque[tuple[float, dict[str, float]]] = field(default_factory=deque)
 
 
 class ControlState:
     """Thread-safe per-machine control + status registry."""
 
-    def __init__(self, default_anomaly_prob: float = 0.0) -> None:
+    def __init__(
+        self,
+        default_anomaly_prob: float = 0.0,
+        *,
+        history_window_s: float = 300.0,
+    ) -> None:
         self._lock = threading.RLock()
         self._machines: dict[str, _MachineEntry] = {}
         self._default_prob = float(default_anomaly_prob)
+        self._history_window_s = float(history_window_s)
         self._started_at = time.time()
 
     # -- loop-side API ----------------------------------------------------
@@ -112,11 +122,19 @@ class ControlState:
             e = self._machines.get(machine_id)
             if e is None:
                 return
+            now = time.time()
             e.state = state
             e.active = active
             e.last_sample = {k: round(float(v), 4) for k, v in sample.items()}
             e.active_anomaly = active_anomaly
-            e.updated_at = time.time()
+            e.updated_at = now
+            # Append to the rolling history and drop anything older than the
+            # window. e.last_sample is a fresh dict each tick, so storing the
+            # reference is safe.
+            e.history.append((now, e.last_sample))
+            cutoff = now - self._history_window_s
+            while e.history and e.history[0][0] < cutoff:
+                e.history.popleft()
 
     # -- server-side API --------------------------------------------------
 
@@ -195,5 +213,36 @@ class ControlState:
                 "server_time": now,
                 "uptime_s": round(now - self._started_at, 1),
                 "machine_count": len(self._machines),
+                "machines": machines,
+            }
+
+    def history(self, since: float = 0.0) -> dict:
+        """Columnar per-sensor history for ``GET /api/history``.
+
+        Returns every stored sample with ``epoch_seconds > since`` so the
+        client can fetch incrementally (``since`` = last timestamp it holds)
+        or backfill the whole window after a disconnect (``since`` = 0).
+        """
+        with self._lock:
+            now = time.time()
+            machines = []
+            for machine_id, e in sorted(self._machines.items()):
+                ts_list: list[float] = []
+                series: dict[str, list[float | None]] = {n: [] for n in e.sensor_names}
+                for ts, sample in e.history:
+                    if ts <= since:
+                        continue
+                    ts_list.append(round(ts, 3))
+                    for n in e.sensor_names:
+                        v = sample.get(n)
+                        series[n].append(None if v is None else float(v))
+                machines.append({
+                    "machine_id": machine_id,
+                    "t": ts_list,
+                    "series": series,
+                })
+            return {
+                "server_time": now,
+                "window_s": self._history_window_s,
                 "machines": machines,
             }

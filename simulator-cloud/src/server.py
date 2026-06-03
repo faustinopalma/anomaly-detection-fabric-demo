@@ -6,6 +6,7 @@ control panel (same-origin, no separate Static Web App) and a small HTTP API:
 * ``GET  /healthz``                       — liveness, no auth
 * ``GET  /config.js``                     — public front-end config, no auth
 * ``GET  /api/state``                     — fleet snapshot (auth)
+* ``GET  /api/history?since=<epoch_s>``   — rolling per-sensor history (auth)
 * ``POST /api/machines/{id}/random``      — {"enabled": bool} (auth)
 * ``POST /api/machines/{id}/inject``      — {"kind": "spike|drift|stuck",
                                              "sensor": "<optional>"} (auth)
@@ -176,6 +177,13 @@ def create_app(
     @app.get("/api/state", dependencies=[Depends(require_auth)])
     def get_state() -> dict:
         return control.snapshot()
+
+    @app.get("/api/history", dependencies=[Depends(require_auth)])
+    def get_history(since: float = 0.0) -> dict:
+        """Rolling per-sensor history. ``since`` (epoch seconds) returns only
+        newer samples for incremental polling; omit it (or pass 0) to backfill
+        the whole retained window after a client reconnect."""
+        return control.history(since=since)
 
     @app.post("/api/machines/{machine_id}/random", dependencies=[Depends(require_auth)])
     def set_random(machine_id: str, body: RandomBody) -> dict:

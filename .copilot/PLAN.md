@@ -1,6 +1,26 @@
 # Plan
 
-_Last updated: 2026-06-03 (control panel rewritten in React + Recharts — DEPLOYED, image web5)_
+_Last updated: 2026-06-03 (server-side chart history + reconnect backfill — DEPLOYED, image web6)_
+
+## DONE — Server-side telemetry history for the charts (deployed)
+
+User report: injected anomalies weren't visible on the dashboard, and putting
+the browser in the background lost data / made the charts jump. Fix: persist a
+rolling per-sensor history server-side and render the charts from it.
+
+- ✅ `control.py`: per-machine `history` ring (`history_window_s`, default 300 s)
+  appended on every `update_status` tick; `ControlState.history(since)` returns
+  columnar per-sensor arrays newer than `since`.
+- ✅ `server.py`: new auth-gated `GET /api/history?since=<epoch_s>` (0 = full
+  window backfill; otherwise incremental).
+- ✅ `webapp`: `ApiClient.getHistory(since)`, `HistoryResponse` type, and
+  `useFleet` rewritten to feed charts from `/api/history` (1 Hz samples, not the
+  2 s poll). Incremental via a `sinceRef` high-water mark; on (re)activation /
+  return-from-hidden it backfills the whole window → no gaps/jumps. Server time
+  aligned to the local clock via an offset.
+- ✅ Redeployed: image `simulator:web6` (build `nfj`), revision
+  `ca-simulator--v2606031733` (100% traffic, healthy); `/api/history` → 401
+  (route wired, gated).
 
 ## DONE — Control-panel rewrite to React + Recharts (deployed)
 
