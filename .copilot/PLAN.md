@@ -1,6 +1,23 @@
 # Plan
 
-_Last updated: 2026-06-02 (per-machine model-quality metrics — DEPLOYED)_
+_Last updated: 2026-06-03 (control-panel UX improvements — DEPLOYED, image web4)_
+
+## DONE — Simulator control-panel improvements (deployed)
+
+User request (Italian): improve the simulated-machines dashboard. Code complete
+(py_compile OK + CNC forced-mode functionally tested) and redeployed.
+
+- ✅ Light/dark theme toggle — `webapp/styles.css` (`--accent-text`/`--track` +
+  `:root[data-theme="light"]`), `webapp/index.html` (`#theme-btn`), `webapp/app.js`
+  (`initTheme`/`applyTheme`/`toggleTheme`, localStorage `panel-theme`).
+- ✅ Scrolling fixed-window chart X axis — `drawChart()` right edge = now,
+  5-min window mapped to width; few points sit at the right and scroll left.
+- ✅ Zero-based chart Y axis — baseline at 0, top auto-scales.
+- ✅ M-003 forced state — `cnc_engine.py` `forced_mode`/`set_forced_mode` +
+  `step()`; `CNCMachine.valid_states=["ACTIVE","IDLE"]` + `set_forced_state`
+  (both `simulator-local/` and `simulator-cloud/` copies).
+- ✅ Redeployed cloud simulator: ACR image `simulator:web4` (build `nfg`) →
+  `ca-simulator` revision `ca-simulator--v2606031550` active + healthy.
 
 ## DONE — Per-machine model-quality metrics on the Fabric dashboard
 

@@ -362,12 +362,13 @@ class CNCMachine:
 
     @property
     def valid_states(self) -> list[str]:
-        # The CNC engine is profile-driven and has no operator-forceable FSM.
-        return []
+        # The CNC engine has no FSM, but the operator can still pin it to a
+        # continuous machining cycle or a quiet pause for the demo.
+        return ["ACTIVE", "IDLE"]
 
     def set_forced_state(self, state: str | None) -> None:
-        # No-op: CNC machine does not support state forcing.
-        return
+        # state is one of valid_states ("ACTIVE"/"IDLE") or None to resume auto.
+        self._eng.set_forced_mode(state)
 
     def is_active(self) -> bool:
         return self._eng.active

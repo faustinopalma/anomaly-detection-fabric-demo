@@ -64,6 +64,7 @@ class CncEngine:
 
         # Runtime state
         self.active = False
+        self.forced_mode: str | None = None  # None | "ACTIVE" | "IDLE"
         self._mode_remaining = 0.0          # seconds left in current idle pause
         self._phase_i = 0                   # index into self.phases
         self._phase_remaining = 0.0
@@ -89,7 +90,29 @@ class CncEngine:
         gap = float(self.rng.lognormal(self._idle["lognorm_mu"], self._idle["lognorm_sigma"]))
         self._mode_remaining = float(np.clip(gap, self._idle["gap_s_min"], self._idle["gap_s_max"]))
 
+    def set_forced_mode(self, mode: str | None) -> None:
+        """Operator override: pin the engine to a continuous machining cycle
+        (``"ACTIVE"``), a quiet pause (``"IDLE"``), or ``None`` to resume the
+        natural cycle/idle scheduling."""
+        self.forced_mode = mode
+
     def step(self, dt: float) -> None:
+        if self.forced_mode == "IDLE":
+            self.active = False
+            return
+        if self.forced_mode == "ACTIVE":
+            if not self.active:
+                self._begin_cycle(dt)
+                return
+            self._phase_remaining -= dt
+            while self._phase_remaining <= 0.0:
+                self._phase_i += 1
+                if self._phase_i >= len(self.phases):
+                    # Loop straight into a fresh cycle instead of going idle.
+                    self._begin_cycle(dt)
+                    return
+                self._phase_remaining += self._phase_dwell[self._phase_i]
+            return
         if not self.active:
             self._mode_remaining -= dt
             if self._mode_remaining <= 0.0:

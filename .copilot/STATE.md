@@ -1,6 +1,35 @@
 # Current state
 
-_Last updated: 2026-06-02 (per-machine quality metrics: marker emit + M-004 scoring + dashboard tile — DEPLOYED)_
+_Last updated: 2026-06-03 (control-panel UX: light/dark theme + scrolling charts + M-003 forced state — REDEPLOYED, image web4)_
+
+## Latest session (2026-06-03) — simulator control-panel improvements (DEPLOYED)
+
+Goal (Italian): improve `webapp/` control panel. Four changes, all done in code
+and **redeployed** to the live Container App (`ca-simulator`), which bakes
+`webapp/` into its image.
+
+1. **Light/dark theme** — `webapp/styles.css`: added `--accent-text`/`--track`
+   vars + a `:root[data-theme="light"]` palette; `webapp/index.html`: new
+   `#theme-btn` (`.ghost`); `webapp/app.js`: `initTheme()` (localStorage
+   `panel-theme`, falls back to `prefers-color-scheme`), `applyTheme()`,
+   `toggleTheme()`. Default = system preference.
+2. **Chart X axis (scrolling fixed window)** — `drawChart()` now maps the full
+   `CHART_WINDOW_MS` (5 min) onto the width with the right edge = `Date.now()`,
+   so few points appear on the right and scroll left instead of stretching.
+3. **Chart Y axis from zero** — baseline anchored at `lo=0` (drops below only on
+   negative values), top still auto-scales to data max.
+4. **M-003 forced state** — `cnc_engine.py` (both copies): added `forced_mode`
+   (None|"ACTIVE"|"IDLE") + `set_forced_mode()`; `step()` honors it (ACTIVE
+   loops cycles, IDLE pins quiet). `CNCMachine` (both `simulate_machines.py`)
+   now exposes `valid_states=["ACTIVE","IDLE"]` and forwards `set_forced_state`.
+   Control plane/server/frontend were already generic → the force-state selector
+   now appears for M-003. Verified: ACTIVE/IDLE hold, auto resumes (py test).
+
+All py_compile OK. **Redeployed:** ACR image `acrsimnsb7uf.azurecr.io/simulator:web4`
+(build `nfg`, Succeeded), Container App `ca-simulator` revision
+`ca-simulator--v2606031550` active + healthy (`/healthz` → `{status:ok,machine_count:4}`).
+Note: `az acr build` log-streaming crashes locally (colorama cp1252) → build with
+`--no-logs`, then `deploy.ps1 -SkipBuild`.
 
 ## Latest session (2026-06-02) — per-machine model-quality metrics (DEPLOYED to Fabric)
 

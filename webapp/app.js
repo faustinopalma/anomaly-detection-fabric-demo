@@ -355,19 +355,23 @@ function drawChart(card, machineId, names) {
   ctx.clearRect(0, 0, cssW, cssH);
 
   const pad = 4;
-  const t0 = h.t[0];
-  const t1 = h.t[h.t.length - 1];
-  const span = Math.max(1, t1 - t0);
-  const xOf = (t) => pad + (t - t0) / span * (cssW - 2 * pad);
+  // Fixed time window: the right edge is "now" and samples scroll right→left.
+  // With only a couple of points they appear on the right instead of being
+  // stretched across the full width.
+  const tRight = Date.now();
+  const tLeft = tRight - CHART_WINDOW_MS;
+  const xOf = (t) => pad + (t - tLeft) / CHART_WINDOW_MS * (cssW - 2 * pad);
 
   names.forEach((n, i) => {
     const arr = h.s[n];
     if (!arr) return;
-    // Per-sensor min/max so all sensors share the vertical space.
-    let lo = Infinity, hi = -Infinity;
+    // Auto-scale the top of the range but anchor the baseline at zero
+    // (drops below zero only if a sensor actually goes negative).
+    let lo = 0, hi = -Infinity;
     for (const v of arr) { if (v == null) continue; if (v < lo) lo = v; if (v > hi) hi = v; }
-    if (!isFinite(lo) || !isFinite(hi)) return;
-    const rng = (hi - lo) || 1;
+    if (!isFinite(hi)) return;
+    if (hi <= lo) hi = lo + 1;
+    const rng = hi - lo;
     const yOf = (v) => (cssH - pad) - (v - lo) / rng * (cssH - 2 * pad);
     ctx.beginPath();
     ctx.lineWidth = 1.25;
@@ -456,10 +460,35 @@ function toast(msg, kind = "ok") {
   setTimeout(() => t.remove(), 3500);
 }
 
+// ---- theme ---------------------------------------------------------------
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = el("theme-btn");
+  if (btn) btn.textContent = theme === "light" ? "Dark" : "Light";
+}
+
+function initTheme() {
+  let theme = null;
+  try { theme = localStorage.getItem("panel-theme"); } catch (e) { /* ignore */ }
+  if (theme !== "light" && theme !== "dark") {
+    theme = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches)
+      ? "light" : "dark";
+  }
+  applyTheme(theme);
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  try { localStorage.setItem("panel-theme", next); } catch (e) { /* ignore */ }
+  applyTheme(next);
+}
+
 // ---- boot ----------------------------------------------------------------
 
 el("signin-btn").addEventListener("click", signIn);
 el("signout-btn").addEventListener("click", signOut);
+el("theme-btn").addEventListener("click", toggleTheme);
 el("charts-btn").addEventListener("click", () => setChartsOn(!state.chartsOn));
 el("pause-btn").addEventListener("click", () => setPaused(!state.paused));
 
@@ -497,4 +526,5 @@ async function boot() {
   }
 }
 
+initTheme();
 boot();

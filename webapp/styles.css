@@ -9,6 +9,24 @@
   --ok: #2ea043;
   --warn: #d29922;
   --bad: #f85149;
+  --accent-text: #04101f;
+  --track: #30363d;
+}
+
+/* Light theme (toggled via data-theme="light" on <html>). */
+:root[data-theme="light"] {
+  --bg: #f6f8fa;
+  --panel: #ffffff;
+  --panel-2: #eef1f5;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #59636e;
+  --accent: #0969da;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --bad: #cf222e;
+  --accent-text: #ffffff;
+  --track: #c8d1da;
 }
 
 * { box-sizing: border-box; }
@@ -55,7 +73,7 @@ button.primary { padding: 10px 20px; font-size: 0.95rem; }
   border-radius: 999px;
   font-weight: 600;
 }
-.pill-unknown { background: #30363d; color: var(--muted); }
+.pill-unknown { background: var(--track); color: var(--muted); }
 .pill-online { background: rgba(46,160,67,0.18); color: var(--ok); }
 .pill-offline { background: rgba(248,81,73,0.18); color: var(--bad); }
 
@@ -99,7 +117,7 @@ button.primary { padding: 10px 20px; font-size: 0.95rem; }
 button {
   background: var(--accent);
   border: none;
-  color: #04101f;
+  color: var(--accent-text);
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 6px;
@@ -176,7 +194,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .switch input { display: none; }
 .slider {
   position: absolute; inset: 0;
-  background: #30363d; border-radius: 999px; transition: .2s; cursor: pointer;
+  background: var(--track); border-radius: 999px; transition: .2s; cursor: pointer;
 }
 .slider::before {
   content: ""; position: absolute; height: 18px; width: 18px;
