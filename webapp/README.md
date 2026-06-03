@@ -1,6 +1,6 @@
 # webapp — simulator control panel (Entra-gated, same-origin)
 
-A tiny, no-build static site (plain HTML/CSS/JS) that drives the cloud
+A **React + TypeScript** single-page app (Vite build) that drives the cloud
 simulator's control API (`simulator-cloud/`). It is served **same-origin**
 by the simulator's FastAPI control server (no separate Static Web App), and
 access is gated behind **Microsoft Entra ID** sign-in.
@@ -14,11 +14,13 @@ From the panel you can:
   so its selector is hidden,
 - toggle **random anomalies** per machine,
 - **inject** a `spike` / `drift` / `stuck` anomaly manually,
-- watch a **client-side 5-minute live chart** of each machine's sensors,
+- watch a **per-sensor 5-minute live chart** of each machine (one chart per
+  sensor, fixed height, numbered axes, zero always in view),
 - detect when the **container is stopped** (the panel goes inactive).
 
-There is no build step — `index.html`, `styles.css`, `app.js` and the
-vendored `vendor/msal-browser.min.js` are served as-is.
+The app is built with **Vite** (React 19 + Recharts + MSAL). Production assets
+are compiled inside the Docker multi-stage build; nothing is served from a
+CDN, so it satisfies the strict `script-src 'self'` Content-Security-Policy.
 
 ## How it connects
 
@@ -41,21 +43,26 @@ the JWT (signature via JWKS, issuer, audience). `401`/`403` surface as
 | `POST /api/machines/{id}/inject` | Entra | `{"kind": "spike\|drift\|stuck", "sensor": "<optional>"}` |
 | `POST /api/machines/{id}/state` | Entra | `{"state": "<FSM state>"\|null}` — `null` releases to Auto |
 
-## The 5-minute live chart (zero extra backend load)
+## The per-sensor live charts (zero extra backend load)
 
-The chart is built **entirely in the browser** from the data already returned
-by the existing `/api/state` poll (which includes each machine's
+The charts are built **entirely in the browser** from the data already
+returned by the existing `/api/state` poll (which includes each machine's
 `last_sample`). There is **no** second server→browser stream:
 
+- each machine renders **one chart per sensor**, each a fixed height, so a
+  machine with more sensors gets a taller card,
+- the **X axis** is the last 5 minutes (numbered HH:MM:SS ticks); the
+  **Y axis** auto-scales to the data but **always keeps zero in view**, even
+  when the signal sits far from zero,
 - it adds no load to the telemetry path or the control API beyond the poll
   that already runs,
 - it **stops when the page closes** (polling stops with it),
 - a **Pause** button puts it in standby (no requests at all),
 - it **auto-pauses when the browser tab is hidden** and resumes when visible.
 
-Charts are off by default behind the header **Charts** toggle. Rendering uses
-a plain `<canvas>` 2D context (no external chart library), so it works under
-the strict `script-src 'self'` Content-Security-Policy.
+Charts are on by default behind the header **Charts** toggle. Rendering uses
+**Recharts** (bundled locally by Vite), so it works under the strict
+`script-src 'self'` Content-Security-Policy.
 
 ## Auth modes
 
@@ -69,22 +76,33 @@ the strict `script-src 'self'` Content-Security-Policy.
 
 ## Run locally
 
-1. Start the simulator with the control API (no Event Hubs needed), serving
-   the panel same-origin from this folder:
+The app has a build step. For day-to-day UI work use the Vite dev server with
+hot reload; it proxies `/api`, `/config.js` and `/healthz` to the running
+simulator (default `http://localhost:8080`, override with `SIM_BACKEND`).
+
+1. Start the simulator with the control API (no Event Hubs needed):
 
    ```pwsh
    $env:SIM_CONTROL_ENABLED = "1"
    $env:SIM_CONTROL_API_KEY = "dev-key"   # X-API-Key fallback for local dev
    $env:SIM_DRY_RUN         = "1"          # no Event Hub sink
-   $env:SIM_WEB_DIR         = "webapp"     # serve this folder at /
    .\.venv\Scripts\python.exe simulator-cloud\src\cloud_runner.py
    ```
 
-2. Open <http://localhost:8080>. With Entra auth off, the panel talks to the
-   same origin using the dev API key.
+2. In another terminal, start the Vite dev server:
 
-> For the Entra-gated flow locally, register `http://localhost:8080` as an SPA
-> redirect URI on the app registration (see
+   ```pwsh
+   cd webapp
+   npm install      # first time only
+   npm run dev      # http://localhost:5173
+   ```
+
+   Open <http://localhost:5173>. To preview the production bundle served the
+   same way as in the container, run `npm run build` then point the simulator
+   at the output with `$env:SIM_WEB_DIR = "webapp/dist"`.
+
+> For the Entra-gated flow locally, register the dev origin as an SPA redirect
+> URI on the app registration (see
 > [`scripts/setup-app-registration.ps1`](../scripts/setup-app-registration.ps1)).
 
 ## Deploy

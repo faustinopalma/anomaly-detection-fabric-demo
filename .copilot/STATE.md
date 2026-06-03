@@ -1,8 +1,48 @@
 # Current state
 
-_Last updated: 2026-06-03 (control-panel UX: light/dark theme + scrolling charts + M-003 forced state — REDEPLOYED, image web4)_
+_Last updated: 2026-06-03 (control panel rewritten in React + Recharts — REDEPLOYED, image web5)_
 
-## Latest session (2026-06-03) — simulator control-panel improvements (DEPLOYED)
+## Latest session (2026-06-03) — control-panel rewrite to React + Recharts (DEPLOYED)
+
+Goal (Italian): separate charts (one per sensor, fixed height each → machines
+with more sensors get a taller column), numbered X/Y axes, zero always visible,
+use a real charting library + best practices (no plain vanilla, React
+preferred), and fix the light/dark theme bug. Done and **redeployed**.
+
+**Stack:** `webapp/` is now a **Vite + React 19 + TypeScript** SPA using
+**Recharts** for charts and **@azure/msal-browser** for auth. Production assets
+are compiled inside a **multi-stage Docker build** (`node:24-slim` → `npm run
+build` → copied into the python image at `/app/webapp`). Still served
+same-origin under the strict `script-src 'self'` CSP (no CDN).
+
+Key files (all new under `webapp/src/`): `main.tsx`, `App.tsx`, `config.ts`,
+`types.ts`, `auth/msal.ts`, `api/client.ts`, `hooks/useFleet.ts` (2 s poll +
+5-min history ring), `theme/{palette,ThemeProvider}.tsx` (React-managed theme
+drives CSS vars **and** passes explicit palette colors into Recharts so charts
+recolor on toggle — fixes the theme bug), `components/{Header,MachineCard,
+SensorChart,Toasts}.tsx`, `styles/index.css`. `SensorChart` = fixed-height
+(132px) Recharts `LineChart`, numeric time X-axis (HH:MM:SS, 5-min window),
+numeric Y-axis with domain `[min(0,lo), max(0,hi)]` + 8% headroom (zero always
+in view). One chart per sensor stacked vertically.
+
+Server change: `simulator-cloud/src/server.py` `/config.js` now emits
+`window.CONFIG = {...}` (was `const CONFIG`) so the ES-module bundle reads it
+robustly. `Dockerfile` → multi-stage; `deploy.ps1` staging now excludes
+`node_modules`/`dist` (ships React sources, build happens in Docker). Deleted
+old vanilla `webapp/{app.js,styles.css,vendor/}`.
+
+`npm run build` passes (tsc + vite). **Redeployed:** ACR image
+`acrsimnsb7uf.azurecr.io/simulator:web5` (build `nfh`, Succeeded), Container App
+`ca-simulator` revision `ca-simulator--v2606031616` active + healthy
+(`/healthz` → `{status:ok,machine_count:4}`; `/` serves the React bundle;
+`/assets/*` → 200). Build gotcha unchanged: `az acr build --no-logs` then
+`deploy.ps1 -ImageTag web5 -SkipBuild -RgName rg-fabric-demo -Location
+italynorth` (capacity lookup needs explicit RG/Location).
+
+Local dev: `cd webapp; npm install; npm run dev` (Vite on :5173, proxies
+`/api`,`/config.js`,`/healthz` to `SIM_BACKEND` ?? `http://localhost:8080`).
+
+## Previous session (2026-06-03) — simulator control-panel improvements (DEPLOYED)
 
 Goal (Italian): improve `webapp/` control panel. Four changes, all done in code
 and **redeployed** to the live Container App (`ca-simulator`), which bakes

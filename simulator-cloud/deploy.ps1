@@ -153,13 +153,14 @@ $image = "$AcrName.azurecr.io/simulator:$ImageTag"
 if ($SkipBuild) {
     Write-Host "[deploy] -SkipBuild set; reusing existing image $image" -ForegroundColor Yellow
 } else {
-    # Stage the control panel into the build context so the image can serve it
-    # same-origin (no Static Web App). Only the runtime assets are shipped.
+    # Stage the control panel sources into the build context. The React app is
+    # compiled inside the Docker multi-stage build, so we ship the sources
+    # (package.json, src/, index.html, configs) but exclude local build output.
     $webStage = Join-Path $PSScriptRoot "webapp"
     if (Test-Path $webStage) { Remove-Item -Recurse -Force $webStage }
     Copy-Item -Recurse -Force (Join-Path $repoRoot "webapp") $webStage
-    foreach ($drop in @("config.js", "staticwebapp.config.json", "deploy.ps1", "README.md")) {
-        Remove-Item -Force (Join-Path $webStage $drop) -ErrorAction SilentlyContinue
+    foreach ($drop in @("node_modules", "dist", "config.js", "staticwebapp.config.json", "deploy.ps1", "README.md", ".gitignore")) {
+        Remove-Item -Recurse -Force (Join-Path $webStage $drop) -ErrorAction SilentlyContinue
     }
 
     Write-Host "[deploy] az acr build -> $image (this is the longest step, ~3-5 min on first build)" -ForegroundColor Cyan

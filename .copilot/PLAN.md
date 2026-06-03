@@ -1,6 +1,26 @@
 # Plan
 
-_Last updated: 2026-06-03 (control-panel UX improvements — DEPLOYED, image web4)_
+_Last updated: 2026-06-03 (control panel rewritten in React + Recharts — DEPLOYED, image web5)_
+
+## DONE — Control-panel rewrite to React + Recharts (deployed)
+
+User request (Italian): separate per-sensor charts (fixed height each → taller
+column when a machine has more sensors), numbered X/Y axes, zero always visible,
+use a real charting library + best practices (React preferred, not plain
+vanilla), and fix the light/dark theme bug. Complete and redeployed.
+
+- ✅ `webapp/` rewritten as a Vite + React 19 + TypeScript SPA (Recharts +
+  @azure/msal-browser), bundled locally (CSP `script-src 'self'`, no CDN).
+- ✅ One fixed-height (132px) Recharts chart per sensor, stacked vertically;
+  numeric time X-axis (HH:MM:SS, 5-min window) + numeric Y-axis with domain
+  `[min(0,lo), max(0,hi)]` + 8% headroom → zero always visible.
+- ✅ Theme bug fixed: React `ThemeProvider` drives CSS vars **and** feeds
+  explicit palette colors into Recharts, so charts recolor on light/dark toggle.
+- ✅ Multi-stage `Dockerfile` (node build → python runtime); `deploy.ps1`
+  staging excludes `node_modules`/`dist`; `server.py` `/config.js` →
+  `window.CONFIG`. Old vanilla `app.js`/`styles.css`/`vendor/` deleted.
+- ✅ `npm run build` passes. Redeployed: ACR image `simulator:web5` (build
+  `nfh`) → `ca-simulator` revision `ca-simulator--v2606031616` active + healthy.
 
 ## DONE — Simulator control-panel improvements (deployed)
 

@@ -162,8 +162,9 @@ def create_app(
         )
         js = (
             '"use strict";\n'
-            "// Served by the simulator control API (same origin).\n"
-            "const CONFIG = {\n"
+            "// Served by the simulator control API (same origin). Assigned to\n"
+            "// window so the React app bundle can read it as window.CONFIG.\n"
+            "window.CONFIG = {\n"
             '  backendUrl: "",\n'
             f'  tenantId: "{tenant_id}",\n'
             f'  clientId: "{client_id}",\n'

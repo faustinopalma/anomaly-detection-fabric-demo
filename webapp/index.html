@@ -4,53 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Simulator control panel</title>
-  <link rel="stylesheet" href="styles.css" />
+  <!-- Runtime config (tenant/client/scope) served same-origin by the control
+       API. Must load before the app bundle so window.CONFIG is available. -->
+  <script src="/config.js"></script>
 </head>
 <body>
-  <header>
-    <h1>Factory simulator &mdash; control panel</h1>
-    <div class="header-right">
-      <span id="user-info" class="user-info hidden"></span>
-      <button id="theme-btn" type="button" class="ghost" title="Toggle light/dark theme">Light</button>
-      <button id="charts-btn" type="button" class="ghost hidden">Charts: off</button>
-      <button id="pause-btn" type="button" class="ghost hidden">Pause</button>
-      <button id="signout-btn" type="button" class="hidden">Sign out</button>
-      <div id="conn-status" class="pill pill-unknown">not connected</div>
-    </div>
-  </header>
-
-  <section id="signin" class="card hidden">
-    <h2>Sign in required</h2>
-    <p class="hint">
-      Access is restricted to authorized users in the organization tenant.
-      Sign in with your work account to control the simulator.
-    </p>
-    <button id="signin-btn" type="button" class="primary">Sign in with Microsoft</button>
-    <p id="signin-error" class="error hidden"></p>
-  </section>
-
-  <section id="offline-banner" class="banner hidden">
-    <strong>Container unreachable.</strong>
-    <span id="offline-detail">The simulator may be stopped to save cost. The
-    panel is inactive; controls are disabled until it responds.</span>
-  </section>
-
-  <section id="fleet-meta" class="meta hidden">
-    <span id="meta-machines"></span>
-    <span id="meta-uptime"></span>
-    <span id="meta-updated"></span>
-  </section>
-
-  <main id="machines" class="grid"></main>
-
-  <footer>
-    <span>Polls <code>/api/state</code> every 2&nbsp;s. Suggested demo flow:
-    turn a machine's random anomalies <em>off</em>, then inject a spike, drift
-    or stuck anomaly manually to show the detector reacting.</span>
-  </footer>
-
-  <script src="vendor/msal-browser.min.js"></script>
-  <script src="config.js"></script>
-  <script src="app.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
