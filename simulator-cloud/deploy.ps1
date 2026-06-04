@@ -47,7 +47,19 @@ param(
     [switch]$AuthAllowApiKey,
     [string]$ControlApiKey,
     [string]$CorsOrigins,
-    [int]   $ControlPort = 8080
+    [int]   $ControlPort = 8080,
+
+    # --- Fabric anomaly-detection overlay (optional) -----------------------
+    # When -EnableFabricQuery is set, the container is given a system-assigned
+    # managed identity and polls the Fabric `anomalies` KQL table so the panel
+    # can show when the model detected each anomaly. The identity must be
+    # granted read (viewer) access to the KQL database separately (see the
+    # post-deploy hint printed by this script). Degrades gracefully if not.
+    [switch]$EnableFabricQuery,
+    [string]$KustoClusterUri,
+    [string]$KustoDatabase,
+    [int]   $FabricPollIntervalS = 15,
+    [int]   $FabricLookbackMin = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -223,6 +235,22 @@ if ($EnableControl) {
     }
 }
 
+# Fabric anomalies poller env vars (only when -EnableFabricQuery).
+if ($EnableFabricQuery) {
+    if (-not $KustoDatabase) { $KustoDatabase = $env:FABRIC_KQLDB_NAME }
+    if (-not $KustoClusterUri) {
+        throw "-EnableFabricQuery requires -KustoClusterUri (the Eventhouse query URI, e.g. https://<...>.kusto.fabric.microsoft.com)"
+    }
+    if (-not $KustoDatabase) {
+        throw "-EnableFabricQuery requires -KustoDatabase (or FABRIC_KQLDB_NAME in .env)"
+    }
+    $envVars += "SIM_FABRIC_QUERY_ENABLED=1"
+    $envVars += "SIM_KUSTO_CLUSTER_URI=$KustoClusterUri"
+    $envVars += "SIM_KUSTO_DATABASE=$KustoDatabase"
+    $envVars += "SIM_FABRIC_POLL_INTERVAL_S=$FabricPollIntervalS"
+    $envVars += "SIM_FABRIC_LOOKBACK_MIN=$FabricLookbackMin"
+}
+
 $appExists = az containerapp show -g $RgName -n $AppName 2>$null
 if ($appExists) {
     Write-Host "[deploy] updating existing container app '$AppName' ..." -ForegroundColor Cyan
@@ -265,6 +293,23 @@ if ($EnableControl) {
         --query "properties.configuration.ingress.fqdn" -o tsv
     if ($fqdn) {
         Write-Host "[deploy] control API endpoint: https://$fqdn" -ForegroundColor Green
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 6c. Managed identity for the Fabric anomalies poller (idempotent)
+# ---------------------------------------------------------------------------
+if ($EnableFabricQuery) {
+    Write-Host "[deploy] assigning system-assigned managed identity" -ForegroundColor Cyan
+    $principalId = az containerapp identity assign -g $RgName -n $AppName `
+        --system-assigned --query principalId -o tsv
+    if ($principalId) {
+        Write-Host "[deploy] container app principalId: $principalId" -ForegroundColor Green
+        Write-Host "" -ForegroundColor Yellow
+        Write-Host "  ACTION REQUIRED: grant this identity read access to the KQL database" -ForegroundColor Yellow
+        Write-Host "  by running this management command in the Fabric Eventhouse query editor:" -ForegroundColor Yellow
+        Write-Host "    .add database ['$KustoDatabase'] viewers ('aadapp=$principalId')" -ForegroundColor Yellow
+        Write-Host "  (the poller degrades gracefully until the grant is in place)" -ForegroundColor Yellow
     }
 }
 
