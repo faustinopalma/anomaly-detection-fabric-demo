@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AccountInfo } from "@azure/msal-browser";
 
 import { Header } from "./components/Header";
@@ -7,6 +7,16 @@ import { ApiClient } from "./api/client";
 import { authConfigured } from "./config";
 import { initAuth, signIn, signOut } from "./auth/msal";
 import { useFleet } from "./hooks/useFleet";
+import type { AnomalyLevel } from "./types";
+
+const LEVELS: AnomalyLevel[] = [1, 2, 3, 4, 5];
+const LEVEL_LABELS: Record<AnomalyLevel, string> = {
+  1: "Lieve",
+  2: "Bassa",
+  3: "Media",
+  4: "Alta",
+  5: "Severa",
+};
 
 function fmtDuration(s: number): string {
   s = Math.round(s || 0);
@@ -24,6 +34,10 @@ export function App() {
   const [paused, setPaused] = useState(false);
   const [hiddenPause, setHiddenPause] = useState(false);
   const [chartsOn, setChartsOn] = useState(true);
+  // Global anomaly-strength level (1..5), applied to every machine. Seeded
+  // once from the server snapshot, then driven by the operator.
+  const [level, setLevelState] = useState<AnomalyLevel>(3);
+  const levelSeeded = useRef(false);
 
   // Boot: initialize MSAL and resolve any existing session / redirect result.
   useEffect(() => {
@@ -54,10 +68,26 @@ export function App() {
   const client = useMemo(() => (account ? new ApiClient(account) : null), [account]);
   const active = Boolean(account) && !paused && !hiddenPause;
 
-  const { snapshot, status, lastUpdated, offlineDetail, getSeries } = useFleet(
-    client,
-    active,
-    chartsOn,
+  const { snapshot, status, lastUpdated, offlineDetail, getSeries, getInjections, getDetections } =
+    useFleet(client, active, chartsOn);
+
+  // Seed the level selector from the server once, so a refresh reflects the
+  // live value without overriding subsequent operator changes.
+  useEffect(() => {
+    if (!levelSeeded.current && snapshot?.level != null) {
+      const lvl = Math.max(1, Math.min(5, snapshot.level)) as AnomalyLevel;
+      setLevelState(lvl);
+      levelSeeded.current = true;
+    }
+  }, [snapshot?.level]);
+
+  const onSetLevel = useCallback(
+    (lvl: AnomalyLevel) => {
+      setLevelState(lvl);
+      levelSeeded.current = true;
+      if (client) void client.setLevel(lvl);
+    },
+    [client],
   );
 
   const onSignOut = useCallback(() => {
@@ -118,6 +148,29 @@ export function App() {
         )}
 
         {account && client && (
+          <div className="toolbar">
+            <span className="toolbar-label">Forza anomalie</span>
+            <div className="level-picker" role="group" aria-label="Livello forza anomalie">
+              {LEVELS.map((lvl) => (
+                <button
+                  key={lvl}
+                  type="button"
+                  className={`level-btn${lvl === level ? " active" : ""}`}
+                  aria-pressed={lvl === level}
+                  title={`Livello ${lvl} — ${LEVEL_LABELS[lvl]}`}
+                  onClick={() => onSetLevel(lvl)}
+                >
+                  {lvl}
+                </button>
+              ))}
+            </div>
+            <span className="toolbar-hint">
+              {LEVEL_LABELS[level]} · vale per tutte le macchine
+            </span>
+          </div>
+        )}
+
+        {account && client && (
           <div className="grid">
             {machines.map((m) => (
               <MachineCard
@@ -126,6 +179,8 @@ export function App() {
                 client={client}
                 chartsOn={chartsOn}
                 getSeries={getSeries}
+                getInjections={getInjections}
+                getDetections={getDetections}
               />
             ))}
           </div>
@@ -134,9 +189,11 @@ export function App() {
 
       <footer>
         <span>
-          Polls <code>/api/state</code> every 2&nbsp;s. Suggested demo flow: turn a machine's
-          random anomalies <em>off</em>, then inject a spike, drift or stuck anomaly manually to
-          show the detector reacting.
+          Polls <code>/api/state</code> every 2&nbsp;s. Imposta la <em>forza</em> (1–5), poi
+          inietta spike, drift o stuck: la <strong>banda ambra</strong> sul grafico segna il
+          periodo iniettato, una <strong>linea verde</strong> quando Fabric rileva l'anomalia
+          corrispondente e una <strong>linea rossa tratteggiata</strong> per le rilevazioni
+          non corrisposte.
         </span>
       </footer>
     </>

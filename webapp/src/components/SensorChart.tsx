@@ -3,6 +3,8 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -10,7 +12,7 @@ import {
 } from "recharts";
 
 import { useTheme } from "../theme/ThemeProvider";
-import type { SeriesPoint } from "../hooks/useFleet";
+import type { DetectionMarker, InjectionBand, SeriesPoint } from "../hooks/useFleet";
 
 const CHART_HEIGHT = 132;
 const WINDOW_MS = 5 * 60 * 1000;
@@ -31,6 +33,8 @@ interface Props {
   sensor: string;
   color: string;
   data: SeriesPoint[];
+  injections?: InjectionBand[];
+  detections?: DetectionMarker[];
 }
 
 /**
@@ -38,8 +42,12 @@ interface Props {
  * 5-minute window (newest sample at the right edge, scrolling left). The Y
  * axis auto-scales to the data but always keeps zero in view, even when the
  * signal sits far from zero.
+ *
+ * Shaded bands mark the periods when an anomaly was injected; vertical markers
+ * show when the Fabric model flagged an anomaly — green when it lines up with
+ * an injection (true positive), red when it does not (unmatched detection).
  */
-function SensorChartImpl({ sensor, color, data }: Props) {
+function SensorChartImpl({ sensor, color, data, injections = [], detections = [] }: Props) {
   const { palette } = useTheme();
 
   const { tLeft, tRight, yDomain } = useMemo(() => {
@@ -69,6 +77,24 @@ function SensorChartImpl({ sensor, color, data }: Props) {
     };
   }, [data]);
 
+  // Clamp band/marker timestamps to the visible window so Recharts renders
+  // them at the edges instead of dropping them.
+  const bands = useMemo(
+    () =>
+      injections
+        .map((b) => ({
+          id: b.id,
+          x1: Math.max(b.start, tLeft),
+          x2: Math.min(b.end, tRight),
+        }))
+        .filter((b) => b.x2 > b.x1),
+    [injections, tLeft, tRight],
+  );
+  const markers = useMemo(
+    () => detections.filter((d) => d.t >= tLeft && d.t <= tRight),
+    [detections, tLeft, tRight],
+  );
+
   return (
     <div className="sensor-chart">
       <span className="sensor-chart-title">
@@ -78,6 +104,27 @@ function SensorChartImpl({ sensor, color, data }: Props) {
       <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
         <LineChart data={data} margin={{ top: 6, right: 10, bottom: 2, left: 4 }}>
           <CartesianGrid stroke={palette.grid} strokeDasharray="3 3" />
+          {bands.map((b) => (
+            <ReferenceArea
+              key={`band-${b.id}`}
+              x1={b.x1}
+              x2={b.x2}
+              fill={palette.band}
+              stroke={palette.bandStroke}
+              strokeOpacity={0.6}
+              ifOverflow="hidden"
+            />
+          ))}
+          {markers.map((m, i) => (
+            <ReferenceLine
+              key={`det-${i}-${m.t}`}
+              x={m.t}
+              stroke={m.matched ? palette.detMatched : palette.detUnmatched}
+              strokeWidth={1.5}
+              strokeDasharray={m.matched ? undefined : "4 3"}
+              ifOverflow="hidden"
+            />
+          ))}
           <XAxis
             dataKey="t"
             type="number"

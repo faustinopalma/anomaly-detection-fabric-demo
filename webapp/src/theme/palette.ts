@@ -22,6 +22,13 @@ export interface ChartPalette {
   cursor: string;
   tooltipBg: string;
   tooltipBorder: string;
+  // Injection band (shaded period when an anomaly was injected).
+  band: string;
+  bandStroke: string;
+  // Fabric detection markers: matched = lines up with an injection (true
+  // positive); unmatched = flagged with no injected ground truth.
+  detMatched: string;
+  detUnmatched: string;
 }
 
 export const CHART_PALETTE: Record<ThemeName, ChartPalette> = {
@@ -32,6 +39,10 @@ export const CHART_PALETTE: Record<ThemeName, ChartPalette> = {
     cursor: "#3a4654",
     tooltipBg: "#1a212b",
     tooltipBorder: "#2e3a48",
+    band: "rgba(210, 153, 34, 0.16)",
+    bandStroke: "rgba(210, 153, 34, 0.5)",
+    detMatched: "#2ea043",
+    detUnmatched: "#f85149",
   },
   light: {
     axis: "#c8d1da",
@@ -40,6 +51,10 @@ export const CHART_PALETTE: Record<ThemeName, ChartPalette> = {
     cursor: "#c8d1da",
     tooltipBg: "#ffffff",
     tooltipBorder: "#d0d7de",
+    band: "rgba(191, 135, 0, 0.14)",
+    bandStroke: "rgba(191, 135, 0, 0.45)",
+    detMatched: "#1a7f37",
+    detUnmatched: "#cf222e",
   },
 };
 

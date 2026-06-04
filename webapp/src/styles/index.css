@@ -184,6 +184,53 @@ button.signout:hover {
   font-size: 0.82rem;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 24px 16px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.toolbar-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.toolbar-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.level-picker {
+  display: inline-flex;
+  gap: 6px;
+}
+.level-btn {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.level-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.level-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));

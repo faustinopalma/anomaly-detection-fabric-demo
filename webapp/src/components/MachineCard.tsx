@@ -4,7 +4,7 @@ import { SensorChart } from "./SensorChart";
 import { useToast } from "./Toasts";
 import { ApiClient, readError } from "../api/client";
 import { colorForSensor } from "../theme/palette";
-import type { SeriesPoint } from "../hooks/useFleet";
+import type { DetectionMarker, InjectionBand, SeriesPoint } from "../hooks/useFleet";
 import type { InjectKind, Machine } from "../types";
 
 const INJECT_KINDS: InjectKind[] = ["spike", "drift", "stuck"];
@@ -14,9 +14,18 @@ interface Props {
   client: ApiClient;
   chartsOn: boolean;
   getSeries: (machineId: string, sensor: string) => SeriesPoint[];
+  getInjections: (machineId: string, sensor: string) => InjectionBand[];
+  getDetections: (machineId: string, sensor: string) => DetectionMarker[];
 }
 
-export function MachineCard({ machine, client, chartsOn, getSeries }: Props) {
+export function MachineCard({
+  machine,
+  client,
+  chartsOn,
+  getSeries,
+  getInjections,
+  getDetections,
+}: Props) {
   const { push: toast } = useToast();
   const id = machine.machine_id;
 
@@ -155,6 +164,8 @@ export function MachineCard({ machine, client, chartsOn, getSeries }: Props) {
               sensor={n}
               color={colorForSensor(i)}
               data={getSeries(id, n)}
+              injections={getInjections(id, n)}
+              detections={getDetections(id, n)}
             />
           ))}
         </div>
