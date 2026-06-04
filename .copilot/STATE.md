@@ -1,6 +1,45 @@
 # Current state
 
-_Last updated: 2026-06-04 (anomaly injection UX overhaul + Fabric detection overlay, live e2e)_
+_Last updated: 2026-06-04 (detection-marker visibility fix + machine-wide injection bands, DEPLOYED synth3)_
+
+## Latest session (2026-06-04) — detection-marker visibility fix (DEPLOYED synth3)
+
+Goal (user, Italian): (1) random-injected anomalies showed no band (only the
+manual-button bands were visible); (2) the Fabric model detections were not
+visible on the simulator dashboard. Use the simplest implementation — ideally
+a visible vertical mark on the chart that scrolls left with the data.
+
+**Root causes & fixes (committed `710e803`):**
+- Random bands: backend was correct (it records random + manual injection
+  windows). `useFleet.ts getInjections` filtered bands to the single affected
+  sensor, so a rare random injection on an arbitrary sensor was almost never on
+  the chart in view. Fix → return ALL of the machine's injection bands
+  (machine-wide rendering).
+- Detections invisible: detections WERE flowing (multivariate, `sensor_id`
+  empty → rendered on every chart). The `ReferenceLine` was drawn BEHIND the
+  data line (low SVG z-order) and thin. Fix → move the detection
+  `ReferenceLine` block to render AFTER `<Line>` (foreground) with
+  `strokeWidth=2`, `ifOverflow="hidden"`. Green solid = matched injection,
+  red dashed = unmatched model detection. Markers carry epoch-ms `x` so they
+  scroll left with the fixed time window.
+
+**Deploy gotcha:** `az acr build` on Windows crashes streaming vite's `✓`
+output (`UnicodeEncodeError` cp1252 in colorama). The server-side build still
+SUCCEEDS (image `synth3` pushed, run `nfn`) but deploy.ps1 throws before the
+containerapp update. Workaround used: `az containerapp update --image
+…:synth3 --revision-suffix vYYMMDDHHmm` (env vars already correct from synth2)
+→ rev `ca-simulator--v2606042213`, RunningAtMaxScale, 100% traffic, healthz
+200, `[fabric_poller] +N detection(s)` confirmed. (Permanent fix: force
+`PYTHONUTF8=1` + `[Console]::OutputEncoding=UTF8` before `az acr build`, or
+build with `--no-logs`/query the run.)
+
+**Note for demos:** detections are sparse and per-machine. M-001/M-004 fire
+reliably; M-002/M-003 may show no detection line unless their model crosses
+threshold during the test.
+
+---
+
+## Previous session (2026-06-04) — injection UX + 5 strength levels + Fabric detection overlay (DEPLOYED)
 
 ## Latest session (2026-06-04) — injection UX + 5 strength levels + Fabric detection overlay (DEPLOYED)
 
