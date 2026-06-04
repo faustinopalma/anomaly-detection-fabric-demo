@@ -259,12 +259,15 @@ export function useFleet(
     return ring.t.map((t, i) => ({ t, v: arr[i] ?? null }));
   }, []);
 
-  // Injection bands to shade on a specific sensor chart.
+  // Injection bands to shade on the charts. Bands are shown machine-wide (on
+  // every sensor chart of the machine), not just on the affected sensor, so the
+  // injected period is always visible — including rare random injections that
+  // hit an arbitrary sensor you may not be looking at.
   const getInjections = useCallback(
-    (machineId: string, sensor: string): InjectionBand[] => {
+    (machineId: string, _sensor: string): InjectionBand[] => {
       const entry = eventsRef.current.get(machineId);
       if (!entry) return [];
-      return entry.injections.filter((b) => b.sensor === sensor);
+      return entry.injections;
     },
     [],
   );

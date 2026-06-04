@@ -115,16 +115,6 @@ function SensorChartImpl({ sensor, color, data, injections = [], detections = []
               ifOverflow="hidden"
             />
           ))}
-          {markers.map((m, i) => (
-            <ReferenceLine
-              key={`det-${i}-${m.t}`}
-              x={m.t}
-              stroke={m.matched ? palette.detMatched : palette.detUnmatched}
-              strokeWidth={1.5}
-              strokeDasharray={m.matched ? undefined : "4 3"}
-              ifOverflow="hidden"
-            />
-          ))}
           <XAxis
             dataKey="t"
             type="number"
@@ -166,6 +156,18 @@ function SensorChartImpl({ sensor, color, data, injections = [], detections = []
             isAnimationActive={false}
             connectNulls={false}
           />
+          {/* Detection markers drawn last so the vertical line sits on top of
+              the data line and grid, clearly visible as it scrolls left. */}
+          {markers.map((m, i) => (
+            <ReferenceLine
+              key={`det-${i}-${m.t}`}
+              x={m.t}
+              stroke={m.matched ? palette.detMatched : palette.detUnmatched}
+              strokeWidth={2}
+              strokeDasharray={m.matched ? undefined : "4 3"}
+              ifOverflow="hidden"
+            />
+          ))}
         </LineChart>
       </ResponsiveContainer>
     </div>
