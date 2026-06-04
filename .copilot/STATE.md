@@ -1,6 +1,62 @@
 # Current state
 
-_Last updated: 2026-06-04 (detection-marker visibility fix + machine-wide injection bands, DEPLOYED synth3)_
+_Last updated: 2026-06-04 (detection-quality calibration: scale-aware injections + per-model thresholds + spike duration, DEPLOYED synth5; container scaled to 0 + Fabric capacity suspended)_
+
+## Latest session (2026-06-04) — detection-quality calibration end-to-end (DEPLOYED synth5, then teardown)
+
+Goal (user, Italian): M-001/M-002/M-003 never showed model-flagged anomalies
+while M-004 fired but with false positives — "puoi controllare tutto end to
+end". Overnight autonomous mandate: run tests + fixes, then stop the container
+and suspend the Fabric capacity.
+
+**Root causes & fixes (committed):**
+- **Injection amplitude was absolute, not relative to each sensor's operating
+  scale** → tiny relative perturbation on high-variance CNC sensors. Fix
+  (`simulate_machines.py`): scale-aware overlays. New `sensor_sigmas(deque)`
+  computes per-sensor rolling std (window ≈ 120 s); `AnomalyOverlay.scale`
+  floors spike/drift/stuck amplitude at `SIGMA_K * sigma`. Run loop keeps a
+  `recent` deque per machine and passes `scales` to `manual_overlay` and
+  `maybe_trigger_overlay`.
+- **Thresholds mis-calibrated.** M-002 raised 3.60 → **4.0** (re-registered
+  v3); M-004 raised 1.47 → **12.0** (re-registered v2) to kill false positives.
+  M-001 (1.007) and M-003 (1.882) unchanged. Threshold lives in
+  `models` table `metadata.threshold`; changed by editing local
+  `metadata.json` + `tools/05_register_model.py` (version bump = reversible).
+- **Multivariate window dilution:** a 5 s spike (~5/64 samples) is averaged
+  away below threshold. Fix: `BASE_DURATION` spike 5 → **28 s**, drift 14 → 22,
+  stuck 12 → 20, plus `SPIKE_SIGMA_K=1.6`, `DRIFT_SIGMA_K=1.8`. Offline
+  `tools/_size_spike_duration.py` confirmed M-002 crosses 4.0 at ~16 samples.
+
+**Validated live (synth5, rev `ca-simulator--v2606042318`, healthz 200):**
+ALL four machines now fire. After Entra-auth manual spikes
+(`api://91351088-...` audience) on M-002/M-003:
+- M-001: 21 anomalies/2h (already worked).
+- **M-002: FIRES — score 6.80 > 4.0** (was silent).
+- **M-003: FIRES — scores 1.96 / 3.90 / 16.53** (was silent).
+- M-004: 51/2h; new threshold 12.0 blocks sub-12 false positives (the residual
+  low-score anomalies in the 2 h window predate the v2 threshold change and age
+  out).
+
+**Build/deploy gotchas reconfirmed:** stage `webapp/` with robocopy
+`/XD node_modules dist` before `az acr build` (a stale host `node_modules`
+breaks `tsc`); `az acr build … --query "status" -o tsv` suppresses the Windows
+cp1252 Unicode crash on vite's `✓` (server build still succeeds — verify via
+`az acr task list-runs`). Control API: `SIM_AUTH_ALLOW_APIKEY=0`, so use
+`az account get-access-token --resource api://91351088-042c-4d80-a8dd-3983979d70b3`.
+
+**Teardown (final, per overnight mandate):** container scaled to zero
+(`az containerapp update -g rg-fabric-demo -n ca-simulator --min-replicas 0
+--max-replicas 0` — NOT teardown.ps1, which deletes the app); Fabric capacity
+suspended (`az fabric capacity suspend`). Resume next morning: set replicas
+back (`--min-replicas 1 --max-replicas 1`) and `az fabric capacity resume`.
+
+**New/updated tools:** `_diagnose_scoring.py`, `_verify_overlay.py`,
+`_size_spike_duration.py`, `_check_injection_landed.py` (anomalies table
+timestamp column is **`detected_at`**, not `ts`), `_calibrate_thresholds.py`.
+
+---
+
+## Earlier session (2026-06-04) — detection-marker visibility fix (DEPLOYED synth3)
 
 ## Latest session (2026-06-04) — detection-marker visibility fix (DEPLOYED synth3)
 

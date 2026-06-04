@@ -65,8 +65,8 @@ def main() -> int:
 
     print("\n=== anomalies landed last 15 min ===")
     q = (
-        "anomalies | where ts > ago(15m) and machine_id in ('M-002','M-003','M-004') "
-        "| summarize n=count(), mx=max(score), recent=max(ts) by machine_id, model_name "
+        "anomalies | where detected_at > ago(15m) and machine_id in ('M-002','M-003','M-004') "
+        "| summarize n=count(), mx=max(score), recent=max(detected_at) by machine_id, model_name "
         "| order by machine_id asc"
     )
     t = client.execute(db, q).primary_results[0]

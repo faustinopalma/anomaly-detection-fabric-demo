@@ -1,6 +1,57 @@
 # Plan
 
-_Last updated: 2026-06-04 (injection UX + 5 levels + Fabric detection overlay, end-to-end)_
+_Last updated: 2026-06-04 (detection calibration DONE + deployed synth5 + teardown)_
+
+## DONE — Fix detection coverage/calibration end-to-end (DEPLOYED synth5, teardown done)
+
+User goal (Italian): M-001/M-002/M-003 "never" flagged by the model; M-004
+flagged but with false positives. Investigate end-to-end and fix. Proceed
+autonomously overnight; at the very end stop the container + pause the Fabric
+capacity.
+
+Diagnosis (tools `_diagnose_scoring.py`, `_calibrate_thresholds.py`,
+`_test_cnc_sensitivity.py`, live KQL over 2–3 h):
+
+- **M-001** (thr 1.007): bimodal — normal max 0.87, injections ≥52. WORKS
+  (≈25 injection windows / 3 h). The user couldn't *see* them before the
+  visibility fix that already shipped. No change.
+- **M-004** (thr 1.471): normal score floor p50=1.14, normal max 8.36, but
+  the threshold sits *inside* the normal cluster → ~50–58 % of NORMAL windows
+  flagged = false positives. Real injections cluster ≥16.9. → **raised
+  threshold to 12.0** (clean gap 8.36↔16.9).
+- **M-002** (thr 3.603): model IS sensitive (offline test: +3σ→4.3–7.7),
+  but the live injection overlay is too weak → injections rarely cross.
+  Normal max 3.26 ≈ threshold → borderline FP risk. → stronger injection +
+  **raised threshold to 4.0**.
+- **M-003** (thr 1.882): no live window ever exceeds 1.69 → never fires. Root
+  cause: the injection overlay amplitude is value-relative (`max(|v|·0.5,1)`)
+  → negligible vs the CNC sensors' huge σ (torque σ=4317) and zero during
+  idle. Offline test confirms the model reacts at ≥3σ additive spikes. →
+  stronger injection; **kept threshold 1.882** (already excludes normal).
+
+Root cause (M-002/M-003): `AnomalyOverlay` scaled the deviation to the
+instantaneous value, fine for the O(1–100) physics sensors but invisible for
+the large-σ CNC sensors and during idle.
+
+Outcome:
+- ☑ Step 1 — `simulate_machines.py`: scale-aware injection via `sensor_sigmas`
+  (rolling ~120 s per-sensor σ) + `AnomalyOverlay.scale` flooring
+  spike/drift/stuck amplitude at `SIGMA_K·σ`. Committed.
+- ☑ Step 2 — M-002 threshold 3.6025→4.0 (v3), M-004 1.4709→12.0 (v2),
+  re-registered via `tools/05_register_model.py`. Committed.
+- ☑ Step 2b — multivariate window-dilution fix: `BASE_DURATION` spike 5→28 s,
+  drift 14→22, stuck 12→20; `SPIKE_SIGMA_K=1.6`, `DRIFT_SIGMA_K=1.8`. Offline
+  `_size_spike_duration.py` confirms M-002 crosses 4.0 at ~16 samples. Committed.
+- ☑ Step 3 — built `simulator:synth4` then `synth5` (carries the duration fix),
+  deployed rev `ca-simulator--v2606042318`, healthz 200.
+- ☑ Step 4 — verified live: M-002 fires (6.80>4.0), M-003 fires (1.96/3.90/16.53),
+  M-001 unchanged (21/2h), M-004 sub-12 false positives blocked.
+- ☑ Step 5 — teardown: `ca-simulator` scaled to 0 replicas; Fabric capacity
+  suspended. Resume: `--min-replicas 1 --max-replicas 1` + `az fabric capacity resume`.
+
+_Earlier section retained below._
+
+## DONE — Injection UX overhaul: visible bands, 5 strength levels, Fabric detections (live)
 
 ## DONE — Injection UX overhaul: visible bands, 5 strength levels, Fabric detections (live)
 
