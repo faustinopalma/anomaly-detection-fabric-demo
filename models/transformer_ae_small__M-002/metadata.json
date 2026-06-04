@@ -11,8 +11,8 @@
   "n_dec_layers": 2,
   "ff_dim": 160,
   "n_parameters": 161419,
-  "threshold": 3.6025431156158447,
-  "threshold_rule": "p99.5 on training-val window scores",
+  "threshold": 4.0,
+  "threshold_rule": "live-calibrated: normal max ~3.26 (3h), injections >=5 with scale-aware overlay",
   "data_source": "synthgen_trace (_local/synthgen/synth_trace_full.npz)",
   "units": {
     "mandrino_load": "%",

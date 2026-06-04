@@ -11,8 +11,8 @@
   "n_dec_layers": 2,
   "ff_dim": 160,
   "n_parameters": 161984,
-  "threshold": 1.4708820915222187,
-  "threshold_rule": "p99.5 on training-val window scores",
+  "threshold": 12.0,
+  "threshold_rule": "live-calibrated: normal max ~8.36 (3h), injections >=16.9; raised from 1.47 to remove false positives",
   "data_source": "synthetic_physics_simulator",
   "training": {
     "epochs": 12,
