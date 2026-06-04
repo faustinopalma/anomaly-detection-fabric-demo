@@ -46,10 +46,13 @@ pwsh ./simulator-cloud/deploy.ps1 `
     -ImageTag v2
 ```
 
-Defaults: `-Machines 4` with the CNC machine pinned to `-CncMachineId M-003`
-(so M-004 is added as a 4th physics machine without moving the CNC role).
-The live fleet ingests 4 machines; 3 are scored in KQL (M-004 is
-ingested-only — see [`../docs/architecture.md` §2b](../docs/architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored)).
+Defaults: `-Machines 4` with the real CNC machine pinned to
+`-CncMachineId M-003` and the synthgen CNC machine pinned to
+`-SynthMachineId M-002` (driven by `-SynthProfile /app/synth_trace_M-002.json`,
+a 1 Hz replay trace baked into the image). So M-004 is added as a 4th physics
+machine without moving either CNC role. The live fleet ingests 4 machines;
+3 are scored in KQL (M-004 is ingested-only — see
+[`../docs/architecture.md` §2b](../docs/architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored)).
 
 To tweak only the runtime parameters without rebuilding the image,
 just rerun the script: it updates the env-vars on the existing

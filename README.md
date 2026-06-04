@@ -25,12 +25,13 @@ machine but its model is not registered for scoring (see note below).
 | Machine | Model (scoring) | Sensors | Data source |
 |---|---|---|---|
 | M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | simulator physics |
-| M-002 | `transformer_ae_small__M-002` | 8 (synthetic) | simulator physics |
+| M-002 | `transformer_ae_small__M-002` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | synthgen replay trace |
 | M-003 | `transformer_ae_small__M-003` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | recorded real CNC profile |
 | M-004 | — (ingested, not scored) | 8 (synthetic) | simulator physics |
 
 Live pipeline: **always-on cloud simulator** (Azure Container App,
-`SIM_MACHINES=4`, `SIM_CNC_MACHINE=M-003`) → Eventstream `es_machines` →
+`SIM_MACHINES=4`, `SIM_CNC_MACHINE=M-003`, `SIM_SYNTH_MACHINE=M-002`) →
+Eventstream `es_machines` →
 KQL `raw_telemetry` → per-machine update-policy functions
 `fn_score_demo_M001/M002/M003` → `anomalies` → Real-Time Dashboard
 `rtd_telemetry_live`.

@@ -163,9 +163,10 @@ in the workspace; re-runs replace the definition in place.
 
 > **Live demo note — per-machine models.** The notebooks above are the
 > generic offline toolbox. The live demo runs **one dedicated ONNX model
-> per machine** (M-001, M-002 synthetic + 8 sensors; **M-003** a real-data
-> CNC machine with 3 sensors). Those models are trained with
-> `tools/train_per_machine.py`, registered with
+> per machine** (M-001 synthetic + 8 sensors; **M-002** a synthgen CNC
+> spindle and **M-003** a real-data CNC machine, each with 3 sensors).
+> Those models are trained with `tools/train_per_machine.py`
+> (M-002 specifically with `tools/train_m002_synth.py`), registered with
 > `tools/05_register_model.py models/transformer_ae_small__<MID>`, and
 > scored by `fn_score_demo_M001/M002/M003()` in
 > [`kql/04_update_policy.kql`](../kql/04_update_policy.kql). See
@@ -254,7 +255,8 @@ and the `SIM_*` control-plane vars in `.env` (see
 [`.env.example`](../.env.example)).
 
 The live fleet ingests **4 machines** (`SIM_MACHINES=4`,
-`SIM_CNC_MACHINE=M-003`); **3 are scored** in KQL (M-004 is ingested-only).
+`SIM_CNC_MACHINE=M-003`, `SIM_SYNTH_MACHINE=M-002`); **3 are scored** in KQL
+(M-004 is ingested-only).
 For the container-only deploy and runtime knobs see
 [`simulator-cloud/README.md`](../simulator-cloud/README.md); for the panel
 features (force-state, anomaly inject, 5-minute live chart) see

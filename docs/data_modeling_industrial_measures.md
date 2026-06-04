@@ -5,13 +5,14 @@
 > (KQL cookbook).
 
 > **Concrete example in this demo.** The live fleet is intentionally
-> heterogeneous: M-001/M-002 are synthetic machines with **8** comparable
-> sensors, while **M-003 is a real CNC spindle** with a **different,
+> heterogeneous: M-001/M-004 are synthetic machines with **8** comparable
+> sensors, while **M-002 and M-003 are CNC spindles** with a **different,
 > smaller signal set** — `mandrino_load` (%), `mandrino_power` (kW),
-> `mandrino_torque` (N*cm). They coexist in the same long `raw_telemetry`
-> table (Type A below) and each is scored by its own per-machine ONNX
-> model, which is exactly why the *long* model scales across machine types
-> without schema churn.
+> `mandrino_torque` (N*cm). M-003 replays a **real** CNC profile and M-002 a
+> **synthgen** trace learned from the same real telemetry. They coexist in
+> the same long `raw_telemetry` table (Type A below) and each is scored by
+> its own per-machine ONNX model, which is exactly why the *long* model
+> scales across machine types without schema churn.
 
 ## Long, Wide, or Hybrid — which to choose and why
 
