@@ -26,6 +26,22 @@ from typing import Deque
 
 VALID_KINDS = ("spike", "drift", "stuck")
 
+# Anomaly strength levels selectable by the operator (1 = mild, 5 = severe).
+# A single global level applies to every machine; the simulator loop reads it
+# when it builds an overlay (manual or random).
+MIN_LEVEL = 1
+MAX_LEVEL = 5
+DEFAULT_LEVEL = 3
+
+
+def clamp_level(level: int) -> int:
+    """Coerce ``level`` into the supported 1..5 range."""
+    try:
+        v = int(level)
+    except (TypeError, ValueError):
+        return DEFAULT_LEVEL
+    return max(MIN_LEVEL, min(MAX_LEVEL, v))
+
 
 @dataclass
 class InjectionRequest:
@@ -37,6 +53,33 @@ class InjectionRequest:
 
 
 @dataclass
+class InjectionWindow:
+    """A recorded anomaly-injection interval, surfaced to the control panel so
+    it can shade the affected period on the sensor charts."""
+
+    id: int
+    machine_id: str
+    kind: str
+    sensor: str
+    start: float                    # epoch seconds (server clock)
+    end: float                      # epoch seconds (server clock)
+    level: int
+    source: str                     # "manual" | "random"
+
+
+@dataclass
+class Detection:
+    """An anomaly the Fabric model wrote to the `anomalies` KQL table, pulled
+    back so the panel can mark *when the detector reacted*."""
+
+    machine_id: str
+    detected_at: float              # epoch seconds (UTC)
+    score: float
+    model_name: str
+    sensor_id: str | None = None
+
+
+@dataclass
 class _MachineEntry:
     sensor_names: list[str]
     random_enabled: bool
@@ -44,6 +87,9 @@ class _MachineEntry:
     valid_states: list[str] = field(default_factory=list)
     forced_state: str | None = None
     queue: Deque[InjectionRequest] = field(default_factory=deque)
+    # Recorded injection windows (manual + random), pruned to the history
+    # window so the panel can shade the affected period on the charts.
+    injections: Deque[InjectionWindow] = field(default_factory=deque)
     # Published status (updated by the sim loop each tick)
     state: str = "unknown"
     active: bool = False
@@ -70,6 +116,12 @@ class ControlState:
         self._default_prob = float(default_anomaly_prob)
         self._history_window_s = float(history_window_s)
         self._started_at = time.time()
+        # Global anomaly-strength level (1..5), applied to every machine.
+        self._level = DEFAULT_LEVEL
+        # Monotonic id generator for injection windows.
+        self._next_injection_id = 1
+        # Detections pulled back from the Fabric `anomalies` table, newest last.
+        self._detections: Deque[Detection] = deque()
 
     # -- loop-side API ----------------------------------------------------
 
@@ -108,6 +160,43 @@ class ControlState:
         with self._lock:
             e = self._machines.get(machine_id)
             return e.forced_state if e is not None else None
+
+    def get_level(self) -> int:
+        """Current global anomaly-strength level (1..5)."""
+        with self._lock:
+            return self._level
+
+    def record_injection(
+        self,
+        machine_id: str,
+        *,
+        kind: str,
+        sensor: str,
+        start: float,
+        end: float,
+        level: int,
+        source: str,
+    ) -> None:
+        """Register an injection interval so the panel can shade it on the
+        charts. Called by the sim loop the moment an overlay starts."""
+        with self._lock:
+            e = self._machines.get(machine_id)
+            if e is None:
+                return
+            e.injections.append(InjectionWindow(
+                id=self._next_injection_id,
+                machine_id=machine_id,
+                kind=kind,
+                sensor=sensor,
+                start=start,
+                end=end,
+                level=int(level),
+                source=source,
+            ))
+            self._next_injection_id += 1
+            cutoff = time.time() - self._history_window_s
+            while e.injections and e.injections[0].end < cutoff:
+                e.injections.popleft()
 
     def update_status(
         self,
@@ -188,6 +277,39 @@ class ControlState:
             e.queue.append(InjectionRequest(kind=kind, sensor=sensor))
             return True
 
+    def set_level(self, level: int) -> int:
+        """Set the global anomaly-strength level (clamped to 1..5). Returns the
+        effective level actually stored."""
+        with self._lock:
+            self._level = clamp_level(level)
+            return self._level
+
+    def add_detections(self, detections: list[Detection]) -> int:
+        """Merge detections pulled from the Fabric `anomalies` table. Dedupes on
+        (machine_id, detected_at, model_name) and prunes to the history window.
+        Returns the number of new detections stored."""
+        with self._lock:
+            existing = {
+                (d.machine_id, round(d.detected_at, 3), d.model_name)
+                for d in self._detections
+            }
+            added = 0
+            for d in detections:
+                key = (d.machine_id, round(d.detected_at, 3), d.model_name)
+                if key in existing:
+                    continue
+                existing.add(key)
+                self._detections.append(d)
+                added += 1
+            # Keep newest-last ordering and prune to the retention window.
+            self._detections = deque(
+                sorted(self._detections, key=lambda d: d.detected_at)
+            )
+            cutoff = time.time() - self._history_window_s
+            while self._detections and self._detections[0].detected_at < cutoff:
+                self._detections.popleft()
+            return added
+
     def snapshot(self) -> dict:
         """Serializable view of the whole fleet for ``GET /api/state``."""
         with self._lock:
@@ -213,6 +335,7 @@ class ControlState:
                 "server_time": now,
                 "uptime_s": round(now - self._started_at, 1),
                 "machine_count": len(self._machines),
+                "level": self._level,
                 "machines": machines,
             }
 
@@ -246,3 +369,50 @@ class ControlState:
                 "window_s": self._history_window_s,
                 "machines": machines,
             }
+
+    def events(self) -> dict:
+        """Injection windows + Fabric detections for ``GET /api/events``.
+
+        The data volume is tiny (a handful of intervals/markers within the
+        retention window), so the whole set is returned each poll. The client
+        aligns the epoch timestamps to its local clock via ``server_time`` (the
+        same trick the history endpoint uses) and renders shaded bands for the
+        injection windows and markers for the detections.
+        """
+        with self._lock:
+            now = time.time()
+            machines = []
+            for machine_id, e in sorted(self._machines.items()):
+                machines.append({
+                    "machine_id": machine_id,
+                    "injections": [
+                        {
+                            "id": w.id,
+                            "kind": w.kind,
+                            "sensor": w.sensor,
+                            "start": round(w.start, 3),
+                            "end": round(w.end, 3),
+                            "level": w.level,
+                            "source": w.source,
+                        }
+                        for w in e.injections
+                    ],
+                })
+            detections = [
+                {
+                    "machine_id": d.machine_id,
+                    "t": round(d.detected_at, 3),
+                    "score": round(float(d.score), 4),
+                    "model_name": d.model_name,
+                    "sensor_id": d.sensor_id,
+                }
+                for d in self._detections
+            ]
+            return {
+                "server_time": now,
+                "window_s": self._history_window_s,
+                "level": self._level,
+                "machines": machines,
+                "detections": detections,
+            }
+
