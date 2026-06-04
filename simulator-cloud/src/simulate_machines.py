@@ -318,8 +318,11 @@ LEVEL_DURATION: dict[int, float] = {1: 0.6, 2: 0.8, 3: 1.0, 4: 1.3, 5: 1.7}
 
 # Base durations (seconds) per kind, before the per-level factor. Spikes used
 # to last a single tick (~0.5 s) which is invisible at 1 Hz on a 300-point
-# chart; they now span several seconds so the injected band reads clearly.
-BASE_DURATION: dict[str, float] = {"spike": 5.0, "drift": 14.0, "stuck": 12.0}
+# chart; they now span enough of the 64-sample scoring window that the
+# window-averaged reconstruction error of the multivariate CNC autoencoders is
+# not diluted away (a 5 s spike on torque only touches ~5/64 of a window and
+# stays below threshold; ~24 s reliably crosses at the default level).
+BASE_DURATION: dict[str, float] = {"spike": 28.0, "drift": 22.0, "stuck": 20.0}
 
 # Operating-scale floor for the deviation amplitude. The value-relative term
 # (max(|v|·0.5,1)) is fine for the O(1–100) physics sensors but is negligible
@@ -331,8 +334,8 @@ BASE_DURATION: dict[str, float] = {"spike": 5.0, "drift": 14.0, "stuck": 12.0}
 # 0 when unknown → behaviour identical to the original value-relative overlay.
 # Because amplitude is a max(), this can only *increase* the injected
 # deviation — it never produces false positives (those come from normal data).
-SPIKE_SIGMA_K = 1.3   # spike floor ≈ 1.3·σ before the per-level factor → ~4σ @ L3
-DRIFT_SIGMA_K = 1.5   # drift peak floor ≈ 1.5·σ before the per-level factor
+SPIKE_SIGMA_K = 1.6   # spike floor ≈ 1.6·σ before the per-level factor → ~5σ @ L3
+DRIFT_SIGMA_K = 1.8   # drift peak floor ≈ 1.8·σ before the per-level factor
 
 
 def _level_factors(level: int) -> tuple[float, float]:
