@@ -68,6 +68,11 @@ class StateBody(BaseModel):
     state: str | None = None
 
 
+class LevelBody(BaseModel):
+    # Global anomaly-strength level (1..5), clamped server-side.
+    level: int
+
+
 class JwtValidator:
     """Validates Entra ID v2.0 access tokens against the tenant JWKS."""
 
@@ -184,6 +189,19 @@ def create_app(
         newer samples for incremental polling; omit it (or pass 0) to backfill
         the whole retained window after a client reconnect."""
         return control.history(since=since)
+
+    @app.get("/api/events", dependencies=[Depends(require_auth)])
+    def get_events() -> dict:
+        """Injection windows + Fabric detections for chart overlays. The volume
+        is small (a handful within the retention window) so the whole set is
+        returned each poll; the client aligns timestamps via ``server_time``."""
+        return control.events()
+
+    @app.post("/api/level", dependencies=[Depends(require_auth)])
+    def set_level(body: LevelBody) -> dict:
+        """Set the global anomaly-strength level (1..5) for the whole fleet."""
+        effective = control.set_level(body.level)
+        return {"level": effective}
 
     @app.post("/api/machines/{machine_id}/random", dependencies=[Depends(require_auth)])
     def set_random(machine_id: str, body: RandomBody) -> dict:
