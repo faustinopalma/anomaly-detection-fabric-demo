@@ -1,6 +1,35 @@
 # Plan
 
-_Last updated: 2026-06-04 (M-002 replaced by synthgen CNC spindle, end-to-end)_
+_Last updated: 2026-06-04 (injection UX + 5 levels + Fabric detection overlay, end-to-end)_
+
+## DONE — Injection UX overhaul: visible bands, 5 strength levels, Fabric detections (live)
+
+User goal (Italian): the inject buttons did nothing visible; make them work
+with 5 shared strength levels (one central selector for all machines), shade
+the injection window as a band on the chart, surface the Fabric model's
+detections on the panel, and flag detections with no matching injection.
+Instruction: proceed to the end, commit every step, deploy fully.
+
+- ✅ Step 1 — `control.py`: level state + `InjectionWindow`/`Detection` +
+  `record_injection`/`add_detections`/`events()` (commit 5c9e79a).
+- ✅ Step 2 — `simulate_machines.py`: level-scaled multi-second overlays;
+  spike = sustained elevated band; record each window (commit 623336a).
+- ✅ Step 3 — `server.py`: `GET /api/events` + `POST /api/level` (f30c9e7).
+- ✅ Step 4 — `fabric_poller.py` + `cloud_runner` wiring + deps (6e30403).
+- ✅ Step 5 — webapp data layer: types/client/useFleet (087f479).
+- ✅ Steps 6-7 — webapp UI: level picker + chart bands/markers + styles
+  (b467295).
+- ✅ Step 8 — `deploy.ps1`: managed identity + Fabric query env (9186202).
+- ✅ Step 9 — built image `synth2`, deployed revision
+  `ca-simulator--v2606042100`, assigned system-assigned managed identity
+  (principalId `08e2e0ce-…`), granted Viewer on `kql_telemetry` via
+  `tools/_grant_kql_viewer.py` (commit 9d6b489). Verified live: `/healthz`
+  200, logs show `[fabric_poller] +N detection(s)` per poll.
+
+**Nothing pending for this feature.** Possible future polish: code-split the
+776 KB webapp bundle; expose the matched/unmatched legend counts.
+
+---
 
 ## DONE — Replace M-002 with a synthgen-simulated CNC machine (live)
 

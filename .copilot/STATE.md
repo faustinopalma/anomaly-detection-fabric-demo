@@ -1,8 +1,52 @@
 # Current state
 
-_Last updated: 2026-06-04 (M-002 replaced by synthgen CNC spindle, live e2e)_
+_Last updated: 2026-06-04 (anomaly injection UX overhaul + Fabric detection overlay, live e2e)_
 
-## Latest session (2026-06-04) — M-002 → synthgen CNC spindle (DEPLOYED)
+## Latest session (2026-06-04) — injection UX + 5 strength levels + Fabric detection overlay (DEPLOYED)
+
+Goal (user, Italian): (1) fix the inject buttons (spikes were invisible —
+single-tick overlays), (2) add a central 5-level strength selector shared by
+all machines, (3) shade the injection window as a band on the simulator chart,
+(4) surface the Fabric model's detections on the panel, (5) flag detections
+that the model raised but that have NO matching injected anomaly.
+
+**Done (all 9 steps, committed individually):**
+- `control.py`: `MIN/MAX/DEFAULT_LEVEL` + `clamp_level`; dataclasses
+  `InjectionWindow` + `Detection`; per-machine injection deque; `get_level`,
+  `set_level`, `record_injection`, `add_detections` (dedupe + prune), `events()`
+  (server_time, window_s, level, machines[].injections[], detections[]).
+- `simulate_machines.py`: `LEVEL_MAGNITUDE`/`LEVEL_DURATION`/`BASE_DURATION`;
+  overlays now scale by level and last several seconds (spike = sustained
+  elevated band). Run loop reads `get_level()`, tags manual vs random, records
+  each injection window alongside the existing ground-truth event.
+- `server.py`: `GET /api/events`, `POST /api/level` (Entra-gated).
+- `fabric_poller.py` (NEW): daemon thread, lazy azure-identity +
+  azure-kusto-data, polls `anomalies | where is_anomaly` and feeds
+  `control.add_detections`. Degrades gracefully if the grant/URI is absent.
+  Wired in `cloud_runner.py`; deps added to `requirements.txt`.
+- webapp: `types.ts`/`client.ts`/`useFleet.ts` (events poll + timestamp
+  alignment + matched/unmatched logic, MATCH_LEAD 30 s / LAG 120 s),
+  `App.tsx` (central level picker, Italian legend), `MachineCard`,
+  `SensorChart` (amber `ReferenceArea` band + green/red dashed
+  `ReferenceLine` detection markers), `palette.ts`, `index.css`.
+- `deploy.ps1`: `-EnableFabricQuery`, `-KustoClusterUri`, `-KustoDatabase`,
+  poll/lookback params; system-assigned managed identity (section 6c) +
+  prints the required KQL grant.
+- `tools/_grant_kql_viewer.py` (NEW): one-shot helper that resolves the
+  cluster URI from the Fabric API and runs `.add database viewers (aadapp=…)`.
+
+**Deployed & verified live:** image
+`acrsimnsb7uf.azurecr.io/simulator:synth2`, revision
+`ca-simulator--v2606042100` (100% traffic, healthy, 4 machines). Container app
+got a **system-assigned managed identity**
+(principalId `08e2e0ce-c5c3-40cc-b336-a1e8c78f7582`, appId
+`69aa55aa-65b6-434a-8ae0-c1afa2282dff`) granted **Viewer** on
+`kql_telemetry`. Logs confirm `[fabric_poller] +N detection(s)` flowing every
+poll → the panel now shows model detections. `/healthz` → 200, 4 machines.
+
+---
+
+## Previous session (2026-06-04) — M-002 → synthgen CNC spindle (DEPLOYED)
 
 Goal (user, Italian): replace M-002 in the live pipeline with a new
 synthgen-simulated CNC machine — in the simulator, the Fabric inference, the
