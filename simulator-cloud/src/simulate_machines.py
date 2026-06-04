@@ -54,6 +54,7 @@ import random
 import signal
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -320,6 +321,19 @@ LEVEL_DURATION: dict[int, float] = {1: 0.6, 2: 0.8, 3: 1.0, 4: 1.3, 5: 1.7}
 # chart; they now span several seconds so the injected band reads clearly.
 BASE_DURATION: dict[str, float] = {"spike": 5.0, "drift": 14.0, "stuck": 12.0}
 
+# Operating-scale floor for the deviation amplitude. The value-relative term
+# (max(|v|·0.5,1)) is fine for the O(1–100) physics sensors but is negligible
+# for sensors with a large operating spread (e.g. CNC mandrino_torque, σ≈4300)
+# and collapses to ~0 while a machine is idle. We therefore floor the spike /
+# drift amplitude at a multiple of the sensor's recent operating σ so injected
+# windows always land a few σ off the model's learned normal manifold and the
+# per-machine autoencoder reacts. σ is supplied by the run loop (rolling 120 s);
+# 0 when unknown → behaviour identical to the original value-relative overlay.
+# Because amplitude is a max(), this can only *increase* the injected
+# deviation — it never produces false positives (those come from normal data).
+SPIKE_SIGMA_K = 1.3   # spike floor ≈ 1.3·σ before the per-level factor → ~4σ @ L3
+DRIFT_SIGMA_K = 1.5   # drift peak floor ≈ 1.5·σ before the per-level factor
+
 
 def _level_factors(level: int) -> tuple[float, float]:
     """Return (magnitude_factor, duration_factor) for a 1..5 level."""
@@ -339,7 +353,9 @@ class AnomalyOverlay:
     ``level`` (1..5) is the operator-selected global strength: it scales both
     the deviation magnitude and the overlay duration so the effect is clearly
     visible on the live charts. ``start`` records the onset epoch so the
-    control plane can shade the exact injected interval.
+    control plane can shade the exact injected interval. ``scale`` is the
+    sensor's recent operating σ (0 = unknown); it floors the deviation so
+    large-σ / idle sensors still move a few σ off-manifold.
     """
 
     kind: str            # "spike" | "drift" | "stuck"
@@ -348,6 +364,7 @@ class AnomalyOverlay:
     duration: float
     level: int = 3
     start: float = 0.0
+    scale: float = 0.0
     stuck_value: float | None = None
 
     def apply(self, sample_dict: dict[str, float], now: float) -> float:
@@ -357,18 +374,22 @@ class AnomalyOverlay:
         if self.kind == "spike":
             # Sustained elevated band for the whole overlay window, with light
             # jitter so it does not look like a flat clip. Magnitude grows with
-            # the level.
-            amp = max(abs(v) * 0.5, 1.0) * (1.5 + 1.5 * mag)
+            # the level and is floored at a multiple of the operating σ.
+            amp = max(abs(v) * 0.5, 1.0, SPIKE_SIGMA_K * self.scale) * (1.5 + 1.5 * mag)
             sign = 1.0 if v >= 0 else -1.0
             sample_dict[self.sensor] = v + sign * amp * random.uniform(0.85, 1.15)
             return max(0.0, 0.6 - 0.08 * self.level)
         if self.kind == "drift":
             t_in = 1.0 - max(0.0, self.until - now) / max(1e-6, self.duration)
-            sample_dict[self.sensor] = v + t_in * max(abs(v) * 0.4, 1.0) * (1.0 + mag)
+            amp = max(abs(v) * 0.4, 1.0, DRIFT_SIGMA_K * self.scale) * (1.0 + mag)
+            sample_dict[self.sensor] = v + t_in * amp
             return max(0.0, 0.7 - 0.07 * self.level)
-        # stuck
+        # stuck: freeze the sensor. If the sensor has a known operating σ, freeze
+        # at an off-manifold constant (current value + a few σ) so a stuck CNC
+        # signal is detectable even when the machine state barely changes.
         if self.stuck_value is None:
-            self.stuck_value = v
+            sign = 1.0 if v >= 0 else -1.0
+            self.stuck_value = v + sign * SPIKE_SIGMA_K * self.scale * (1.0 + mag)
         sample_dict[self.sensor] = self.stuck_value
         return max(0.0, 0.4 - 0.05 * self.level)
 
@@ -507,7 +528,8 @@ class SynthMachine:
 
 
 def maybe_trigger_overlay(
-    now: float, sensor_names: list[str], level: int = 3
+    now: float, sensor_names: list[str], level: int = 3,
+    scales: dict[str, float] | None = None,
 ) -> AnomalyOverlay:
     kind = random.choice(["spike", "drift", "stuck"])
     sensor = random.choice(sensor_names)
@@ -515,12 +537,13 @@ def maybe_trigger_overlay(
     # Light randomisation around the base duration, then scaled by the level.
     base = BASE_DURATION[kind] * random.uniform(0.85, 1.2)
     d = base * dur_factor
-    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now)
+    scale = float((scales or {}).get(sensor, 0.0))
+    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now, scale=scale)
 
 
 def manual_overlay(
     now: float, kind: str, sensor: str | None, sensor_names: list[str],
-    level: int = 3,
+    level: int = 3, scales: dict[str, float] | None = None,
 ) -> AnomalyOverlay:
     """Build an overlay for an operator-requested manual injection.
 
@@ -532,7 +555,28 @@ def manual_overlay(
     kind = kind if kind in BASE_DURATION else "spike"
     _, dur_factor = _level_factors(level)
     d = BASE_DURATION[kind] * dur_factor
-    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now)
+    scale = float((scales or {}).get(sensor, 0.0))
+    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now, scale=scale)
+
+
+def sensor_sigmas(buf: "deque[dict[str, float]]") -> dict[str, float]:
+    """Per-sensor operating σ over a rolling buffer of recent clean samples.
+
+    Captures each sensor's operating spread (active + idle) so the injection
+    overlay can size deviations relative to the real signal scale. Returns an
+    empty dict until enough history has accumulated, so early-startup overlays
+    fall back to the value-relative amplitude.
+    """
+    if len(buf) < 8:
+        return {}
+    sigmas: dict[str, float] = {}
+    for sname in buf[-1].keys():
+        vals = np.fromiter(
+            (b[sname] for b in buf if sname in b), dtype=np.float64
+        )
+        if vals.size > 1:
+            sigmas[sname] = float(vals.std())
+    return sigmas
 
 
 
@@ -641,6 +685,13 @@ def run(
     # Active per-machine anomaly overlays (at most one per machine at a time)
     active: dict[str, AnomalyOverlay] = {}
 
+    # Rolling per-machine buffer of recent CLEAN samples (pre-overlay), used to
+    # size injection deviations relative to each sensor's operating σ. ~120 s.
+    sigma_window = max(16, int(round(rate_per_sensor * 120)))
+    recent: dict[str, deque] = {
+        mid: deque(maxlen=sigma_window) for mid in machines
+    }
+
     sent = 0
     try:
         with producer:
@@ -653,6 +704,11 @@ def run(
                         m.set_forced_state(control.forced_state(machine_id))
                     m.step(interval)
                     s = m.sample()
+
+                    # Record the clean (pre-overlay) sample so injection
+                    # deviations can be sized to each sensor's operating σ.
+                    buf = recent[machine_id]
+                    buf.append(dict(s))
 
                     ov = active.get(machine_id)
                     if ov is not None and now >= ov.until:
@@ -672,18 +728,20 @@ def run(
                     ov_started = False
                     ov_source = "random"
                     level = control.get_level() if control is not None else 3
+                    scales = sensor_sigmas(buf)
                     if ov is None and control is not None:
                         req = control.pop_injection(machine_id)
                         if req is not None:
                             ov = manual_overlay(
-                                now, req.kind, req.sensor, m.sensor_names, level
+                                now, req.kind, req.sensor, m.sensor_names, level,
+                                scales,
                             )
                             active[machine_id] = ov
                             ov_started = True
                             ov_source = "manual"
 
                     if ov is None and m.is_active() and random.random() < prob:
-                        ov = maybe_trigger_overlay(now, m.sensor_names, level)
+                        ov = maybe_trigger_overlay(now, m.sensor_names, level, scales)
                         active[machine_id] = ov
                         ov_started = True
                         ov_source = "random"
