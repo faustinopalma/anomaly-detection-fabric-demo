@@ -36,6 +36,8 @@ ENV SIM_MACHINES=3 \
     SIM_ANOMALY_PROB=0.0005 \
     SIM_BATCH_SIZE=200 \
     SIM_CNC_PROFILE=/app/cnc_profile_M-003.json \
+    SIM_SYNTH_PROFILE=/app/synth_trace_M-002.json \
+    SIM_SYNTH_MACHINE=M-002 \
     SIM_WEB_DIR=/app/webapp
 
 CMD ["python", "-u", "cloud_runner.py"]

@@ -384,6 +384,97 @@ class CNCMachine:
         return f"mode={mode}"
 
 
+# ---------------------------------------------------------------------------
+# Synthgen replay machine (M-002) - replays a pre-generated synthetic CNC
+# spindle trace (produced by tools/build_synth_trace.py from the synthgen
+# hybrid model) on a loop, behind the same polymorphic interface. No real
+# data is shipped; the trace is fully synthetic and privacy-safe.
+# ---------------------------------------------------------------------------
+
+
+def load_synth_trace(path: str | Path) -> dict:
+    """Load and validate a synthgen replay trace JSON."""
+    trace = json.loads(Path(path).read_text(encoding="utf-8"))
+    values = np.asarray(trace["values"], dtype=np.float32)
+    active = np.asarray(trace.get("active", np.ones(len(values))), dtype=bool)
+    if values.ndim != 2 or values.shape[0] == 0:
+        raise ValueError(f"synth trace {path}: expected non-empty 2-D values")
+    if len(active) != len(values):
+        raise ValueError(f"synth trace {path}: active/values length mismatch")
+    trace["_values"] = values
+    trace["_active"] = active
+    return trace
+
+
+class SynthMachine:
+    """CNC spindle driven by a looped synthgen replay trace.
+
+    The trace is a 1 Hz sequence of the three spindle signals plus an
+    active/idle flag. ``step(dt)`` advances a fractional cursor (1 row per
+    second) and the playback loops seamlessly. The operator can pin the
+    machine ACTIVE (cut continuously, skipping idle rows) or IDLE (near-zero).
+    """
+
+    def __init__(self, machine_id: str, trace: dict, seed: int | None = None) -> None:
+        self.machine_id = machine_id
+        self._sensor_names = list(trace["sensors"])
+        self._values = trace["_values"]
+        self._active = trace["_active"]
+        self._n = len(self._values)
+        self._rng = np.random.default_rng(seed)
+        # Active-only playlist for the forced-ACTIVE mode.
+        self._active_idx = np.flatnonzero(self._active)
+        if self._active_idx.size == 0:
+            self._active_idx = np.arange(self._n)
+        # Idle noise std derived from the trace's own idle rows.
+        idle_rows = self._values[~self._active]
+        if idle_rows.shape[0] > 1:
+            self._idle_std = idle_rows.std(axis=0).astype(np.float32)
+        else:
+            self._idle_std = np.maximum(
+                np.abs(self._values).std(axis=0) * 0.02, 1e-3
+            ).astype(np.float32)
+        self._cursor = 0.0       # fractional row index over the full trace
+        self._acursor = 0.0      # fractional index over the active playlist
+        self._forced: str | None = None
+
+    @property
+    def sensor_names(self) -> list[str]:
+        return list(self._sensor_names)
+
+    @property
+    def valid_states(self) -> list[str]:
+        return ["ACTIVE", "IDLE"]
+
+    def set_forced_state(self, state: str | None) -> None:
+        self._forced = state if state in ("ACTIVE", "IDLE") else None
+
+    def is_active(self) -> bool:
+        if self._forced == "ACTIVE":
+            return True
+        if self._forced == "IDLE":
+            return False
+        return bool(self._active[int(self._cursor) % self._n])
+
+    def step(self, dt: float) -> None:
+        self._cursor += dt
+        self._acursor += dt
+
+    def sample(self) -> dict[str, float]:
+        if self._forced == "IDLE":
+            row = self._rng.normal(0.0, self._idle_std).astype(np.float32)
+        elif self._forced == "ACTIVE":
+            i = self._active_idx[int(self._acursor) % self._active_idx.size]
+            row = self._values[i]
+        else:
+            row = self._values[int(self._cursor) % self._n]
+        return {name: float(row[j]) for j, name in enumerate(self._sensor_names)}
+
+    def status(self) -> str:
+        mode = "CUT" if self.is_active() else "idle"
+        return f"mode={mode}"
+
+
 def maybe_trigger_overlay(now: float, sensor_names: list[str]) -> AnomalyOverlay:
     kind = random.choice(["spike", "drift", "stuck"])
     sensor = random.choice(sensor_names)
@@ -426,17 +517,25 @@ def iso_utc(ts: float) -> str:
 
 
 def build_machines(n_machines: int, cnc_profile: dict | None = None,
-                   cnc_machine_id: str | None = None) -> dict[str, object]:
+                   cnc_machine_id: str | None = None,
+                   synth_trace: dict | None = None,
+                   synth_machine_id: str | None = None) -> dict[str, object]:
     """Build the fleet.
 
     FSM physics machines are created for every id; if ``cnc_profile`` is given,
     the machine whose id matches ``cnc_machine_id`` (default: the last one,
-    ``M-{n:03d}``) is replaced by a real-data-derived :class:`CNCMachine`.
+    ``M-{n:03d}``) is replaced by a real-data-derived :class:`CNCMachine`. If
+    ``synth_trace`` is given, the machine whose id matches ``synth_machine_id``
+    is replaced by a :class:`SynthMachine` that replays the synthgen trace.
     """
     cnc_id = cnc_machine_id or (f"M-{n_machines:03d}" if cnc_profile else None)
+    synth_id = synth_machine_id if synth_trace else None
     machines: dict[str, object] = {}
     for i in range(1, n_machines + 1):
         machine_id = f"M-{i:03d}"
+        if synth_trace is not None and machine_id == synth_id:
+            machines[machine_id] = SynthMachine(machine_id, synth_trace)
+            continue
         if cnc_profile is not None and machine_id == cnc_id:
             machines[machine_id] = CNCMachine(machine_id, cnc_profile)
             continue
@@ -651,6 +750,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Machine id driven by the CNC profile (e.g. M-003). Defaults to "
                         "the last machine (M-{machines:03d}). Use this to keep the CNC "
                         "engine on a fixed id while adding more physics machines.")
+    p.add_argument("--synth-trace", type=str, default=None,
+                   help="Path to a synthgen replay trace JSON (see "
+                        "tools/build_synth_trace.py). When set, one machine replays "
+                        "the synthetic CNC spindle trace on a loop.")
+    p.add_argument("--synth-machine-id", type=str, default=None,
+                   help="Machine id driven by the synthgen replay trace (e.g. M-002).")
     p.add_argument("--quiet", action="store_true", help="Suppress per-tick log output.")
     p.add_argument("--dry-run", action="store_true",
                    help="Generate telemetry but do not send it to Event Hubs "
@@ -702,8 +807,25 @@ def main(argv: list[str] | None = None, control: "ControlState | None" = None) -
         cnc_target = cnc_machine_id or f"M-{args.machines:03d}"
         print(f"[sim] CNC profile loaded for {cnc_target}: {cnc_path.name}")
 
+    synth_trace = None
+    synth_machine_id = args.synth_machine_id or os.environ.get("SIM_SYNTH_MACHINE")
+    synth_path = args.synth_trace or os.environ.get("SIM_SYNTH_PROFILE")
+    if synth_path:
+        synth_path = Path(synth_path)
+        if not synth_path.is_absolute():
+            synth_path = repo_root / synth_path
+        if not synth_path.exists():
+            print(f"ERROR: synth trace not found: {synth_path}", file=sys.stderr)
+            return 2
+        synth_trace = load_synth_trace(synth_path)
+        synth_target = synth_machine_id or "M-002"
+        print(f"[sim] synthgen trace loaded for {synth_target}: {synth_path.name} "
+              f"({len(synth_trace['_values'])} steps, "
+              f"duty={synth_trace.get('duty_cycle', 'n/a')})")
+
     machines = build_machines(
-        args.machines, cnc_profile=cnc_profile, cnc_machine_id=cnc_machine_id
+        args.machines, cnc_profile=cnc_profile, cnc_machine_id=cnc_machine_id,
+        synth_trace=synth_trace, synth_machine_id=synth_machine_id,
     )
     if control is not None:
         control.register_machines(machines)

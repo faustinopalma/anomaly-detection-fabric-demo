@@ -15,6 +15,11 @@ All knobs are read from environment variables:
                                            the CNC engine drives one machine
   SIM_CNC_MACHINE     (optional)           machine id for the CNC engine
                                            (default: the last machine)
+  SIM_SYNTH_PROFILE   (optional)           path to a synthgen replay trace JSON;
+                                           when set, one machine replays the
+                                           synthetic CNC spindle trace on a loop
+  SIM_SYNTH_MACHINE   (optional)           machine id for the synthgen trace
+                                           (e.g. M-002)
   SIM_QUIET           (default unset)      set to "1" to suppress per-tick logs
 
 Optional operator control plane (Static Web App backend):
@@ -99,6 +104,8 @@ def _argv_from_env() -> list[str]:
         ("SIM_BATCH_SIZE",   "--batch-size"),
         ("SIM_CNC_PROFILE",  "--cnc-profile"),
         ("SIM_CNC_MACHINE",  "--cnc-machine-id"),
+        ("SIM_SYNTH_PROFILE", "--synth-trace"),
+        ("SIM_SYNTH_MACHINE", "--synth-machine-id"),
     ):
         v = os.environ.get(env_key)
         if v:

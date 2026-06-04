@@ -33,6 +33,8 @@ param(
     [double]$AnomalyProb = 0.0005,
     [string]$CncProfile = "/app/cnc_profile_M-003.json",
     [string]$CncMachineId = "M-003",
+    [string]$SynthProfile = "/app/synth_trace_M-002.json",
+    [string]$SynthMachineId = "M-002",
 
     # --- Control plane / auth (optional) -----------------------------------
     # When -EnableControl is set, the container exposes the FastAPI control
@@ -198,6 +200,8 @@ $envVars = @(
     "SIM_CNC_PROFILE=$CncProfile"
 )
 if ($CncMachineId) { $envVars += "SIM_CNC_MACHINE=$CncMachineId" }
+if ($SynthProfile) { $envVars += "SIM_SYNTH_PROFILE=$SynthProfile" }
+if ($SynthMachineId) { $envVars += "SIM_SYNTH_MACHINE=$SynthMachineId" }
 
 # Secrets to (re)apply on every deploy.
 $secrets = @("eventstream-conn=$($env:EVENTSTREAM_CONNECTION_STRING)")
