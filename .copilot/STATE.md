@@ -1,8 +1,68 @@
 # Current state
 
-_Last updated: 2026-06-03 (server-side chart history + reconnect backfill — REDEPLOYED, image web6)_
+_Last updated: 2026-06-04 (synthgen AML job submitted: goofy_chin_4c2qx9bn5v; storage firewall opened+restored)_
 
-## Latest session (2026-06-03) — server-side telemetry history for the charts (DEPLOYED)
+## Latest session (2026-06-04) — synthgen: SOTA hybrid synthetic CNC telemetry generator
+
+Goal (user, Italian): build a state-of-the-art synthetic data generator that
+mimics the real CNC spindle telemetry as faithfully as possible; methodology
+defined locally (fast CPU loops), full training on Azure ML with the SAME code
+(config-only difference). Approach: **hybrid generative** = HMM/Markov regime
+model on `fase` + conditional 1-D diffusion (DDPM) for the 3 signals + a
+point-process/histogram timing model for irregular sub-second timestamps.
+
+**Real data (`_data_local/cnc_real_wide.parquet`):** ONE spindle, 393116×4, ts
+index tz-aware; cols `mandrino_load/power/torque` (float) + `fase` (int 0..24).
+measure_id map: 9=load, 10=torque, 11=power, 17=fase. Irregular ~0.2-0.3 s
+cadence, heavy tails, negatives, strong load↔power↔torque coupling.
+
+**Delivered (thin-notebook / thick-package design):**
+- `synthgen/` package: `config.py` (YAML local/cloud), `features.py` (signed
+  log-modulus scaler), `data.py` (resample→windows + gaps + regime views),
+  `metrics/__init__.py` (fidelity "judge": KS/Wasserstein, corr error, ACF/PSD,
+  regime durations + transition matrix, discriminative + predictive scores),
+  `models/{regime,timing,diffusion}.py` (Markov+dwell, per-regime gap hist,
+  self-contained PyTorch conditional DDPM with FiLM + physics-coherence penalty),
+  `pipeline.py` (`fit`/`generate` → long schema), `aml.py` (get_client /
+  stage_cloud_bundle / submit_training / poll / stream / download_model).
+- `configs/synthgen.yaml` (defaults + local + cloud blocks).
+- `cloud-training-synth/src/train_diffusion.py` + `environment/conda.yml`
+  (AML GPU entrypoint; imports the staged `synthgen` package).
+- `notebooks/08_synthgen_pipeline.ipynb` (10-step instructive orchestrator).
+- `.gitignore`: ignore staged job snapshot dirs under `cloud-training-synth/src/`.
+
+**AML coords (existing workspace):** sub `7ecf802f-04ac-4e81-8703-c3d39074f823`,
+rg `rg-anomaly-ml-westeurope`, ws `anomalyml-mlw`, GPU cluster `gpu-t4-cluster`
+(`Standard_NC4as_T4_v3`, NCASv3_T4 quota=16). Artifact download via AAD blob
+(storage `allowSharedKeyAccess=false`).
+
+**Verified:** all modules import; end-to-end `fit`+`generate`+`fidelity_report`
+runs on a subset (CPU smoke); cloud bundle staging resolves config + data
+inside the snapshot; notebook validates (27 cells).
+
+**AML submit (2026-06-04) — DONE:** full GPU job submitted →
+`JOB NAME: goofy_chin_4c2qx9bn5v` (status Preparing at submit). Snapshot upload
+4.62 MB via AAD blob. Poll/download cells (8-9) re-run when the job completes.
+
+**Storage access gotchas resolved this session:**
+- `stanomalymlfknlnf4v` is the workspace default store; `allowSharedKeyAccess=false`
+  AND was `publicNetworkAccess=Disabled` (private-endpoint only) → local code
+  snapshot upload failed with `AuthorizationFailure`.
+- Fix: (1) assigned **Storage Blob Data Contributor** to signed-in user
+  (oid `1fecccf2-92b5-49f6-8c3c-8ecdbe29fe27`) on the storage account; (2)
+  TEMPORARILY opened the firewall (Enabled + Deny + single-IP allowlist
+  `213.45.37.216`) for the upload, then **RESTORED** to original
+  (`publicNetworkAccess=Disabled`, `defaultAction=Allow`, no IP rules).
+- The running cloud job reaches storage via `bypass=AzureServices`, unaffected
+  by the public-access toggle. **Downloading artifacts from the local machine
+  will require briefly re-opening the firewall** (same Enabled+Deny+IP recipe),
+  then restore Disabled.
+- Hardened `synthgen/aml.stage_cloud_bundle` with `_force_rmtree` (clears
+  read-only bits) for Windows/OneDrive locks; if the kernel caches an old
+  module, pre-clean `cloud-training-synth/src/{synthgen,configs,data}` via the
+  terminal before re-staging.
+
+## Previous session (2026-06-03) — server-side telemetry history for the charts (DEPLOYED)
 
 Goal (user): injected anomalies weren't visible in the dashboard, and leaving
 the browser in the background caused gaps/jumps in the charts. Fix: persist a

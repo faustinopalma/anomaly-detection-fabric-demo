@@ -1,0 +1,67 @@
+# Configuration for the synthgen hybrid generator.
+#
+# `defaults` holds values shared by every run. The `local` and `cloud` blocks
+# override only what changes between a fast methodology loop (CPU, data subset,
+# few epochs) and the full Azure ML GPU training. The model code is identical.
+
+defaults:
+  out_dir: _local/synthgen
+  data:
+    wide_path: _data_local/cnc_real_wide.parquet
+    raw_dir: _data_local/parquet_files_raw
+    window: 128
+    stride: 64
+    resample_ms: 200
+    active_load_threshold: 2.0
+    train_frac: 0.7
+    val_frac: 0.15
+  diffusion:
+    base_width: 64
+    n_res_blocks: 2
+    regime_embed_dim: 16
+    n_regimes: 32
+    timesteps: 200
+    beta_start: 0.0001
+    beta_end: 0.02
+    lr: 0.0002
+    batch_size: 64
+    physics_lambda: 0.1
+    seed: 7
+  regime:
+    smoothing: 1.0
+    min_dwell: 1
+  timing:
+    max_gap_s: 5.0
+    n_bins: 60
+  aml:
+    subscription: 7ecf802f-04ac-4e81-8703-c3d39074f823
+    resource_group: rg-anomaly-ml-westeurope
+    workspace: anomalyml-mlw
+    gpu_cluster: gpu-t4-cluster
+    gpu_sku: Standard_NC4as_T4_v3
+    experiment_name: synthgen-diffusion
+    environment_image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04:latest
+
+# Fast local methodology loop.
+local:
+  mode: local
+  device: cpu
+  subset_days: 3.0
+  diffusion:
+    epochs: 2
+    timesteps: 100
+    batch_size: 64
+
+# Full training on Azure ML (GPU). subset_days null = use all data.
+# wide_path points at the data staged inside the job code snapshot (see the
+# "prepare cloud bundle" step in the orchestrator notebook / synthgen.aml).
+cloud:
+  mode: cloud
+  device: cuda
+  subset_days: null
+  data:
+    wide_path: data/cnc_real_wide.parquet
+  diffusion:
+    epochs: 300
+    timesteps: 200
+    batch_size: 256

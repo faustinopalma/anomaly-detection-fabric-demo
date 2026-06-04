@@ -1,6 +1,30 @@
 # Plan
 
-_Last updated: 2026-06-03 (server-side chart history + reconnect backfill — DEPLOYED, image web6)_
+_Last updated: 2026-06-04 (synthgen hybrid synthetic CNC telemetry generator)_
+
+## DONE — synthgen: SOTA hybrid synthetic data generator (local + Azure ML)
+
+User goal (Italian): generate synthetic CNC spindle telemetry as faithful as
+possible to the real data; method defined in local fast loops, full training on
+Azure ML with the SAME code (config-only difference). Approach = hybrid:
+Markov/HMM regime on `fase` + conditional 1-D diffusion (DDPM) for the 3 signals
++ histogram/point-process timing for irregular sub-second timestamps.
+
+- ✅ `synthgen/` package (config, features scaler, data views, fidelity metrics,
+  regime/timing/diffusion models, pipeline `fit`/`generate`, AML helpers).
+- ✅ `configs/synthgen.yaml` (defaults + `local`/`cloud` overrides).
+- ✅ `cloud-training-synth/src/train_diffusion.py` + `environment/conda.yml`
+  (AML GPU entrypoint; trains + logs fidelity to MLflow; writes `outputs/`).
+- ✅ `notebooks/08_synthgen_pipeline.ipynb` — 10-step instructive orchestrator:
+  setup → EDA → dataset → regime/timing → diffusion smoke (local) → fidelity →
+  submit AML (returns job_name) → poll/stream → download → local test + scorecard
+  → export long schema. Cells 7-9 idempotent/independent.
+- ✅ `.gitignore` excludes staged job-snapshot dirs under `cloud-training-synth/src/`.
+- ✅ Verified end-to-end locally (fit+generate+fidelity on a 1-day subset; bundle
+  staging; notebook validates, 27 cells).
+- ⬜ NEXT (user-driven): run notebook cells 7-9 to submit the full GPU training,
+  download the model, and review the final fidelity scorecard. Tune epochs /
+  `physics_lambda` / window if marginals or correlation error are high.
 
 ## DONE — Server-side telemetry history for the charts (deployed)
 

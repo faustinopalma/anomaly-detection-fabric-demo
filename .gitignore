@@ -56,3 +56,9 @@ _*.txt
 # Control panel staged into the container build context by deploy.ps1
 simulator-cloud/webapp/
 
+# synthgen cloud job snapshot — staged at submit time (synthgen/, configs/, data/
+# are copied in from the repo + _data_local; not committed). The entrypoint and
+# environment ARE committed.
+cloud-training-synth/src/synthgen/
+cloud-training-synth/src/configs/
+cloud-training-synth/src/data/
