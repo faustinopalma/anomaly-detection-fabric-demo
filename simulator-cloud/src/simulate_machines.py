@@ -308,6 +308,24 @@ class Machine:
 # Streaming-only post-hoc anomaly overlay
 # ---------------------------------------------------------------------------
 
+# Per-level scaling for anomaly overlays. A single global level (1..5, set by
+# the operator from the control panel) drives both how *large* the deviation is
+# and how *long* it lasts, so higher levels are unmistakably visible on the
+# 5-minute charts. Index by level (1-based).
+LEVEL_MAGNITUDE: dict[int, float] = {1: 0.6, 2: 0.85, 3: 1.0, 4: 1.35, 5: 1.8}
+LEVEL_DURATION: dict[int, float] = {1: 0.6, 2: 0.8, 3: 1.0, 4: 1.3, 5: 1.7}
+
+# Base durations (seconds) per kind, before the per-level factor. Spikes used
+# to last a single tick (~0.5 s) which is invisible at 1 Hz on a 300-point
+# chart; they now span several seconds so the injected band reads clearly.
+BASE_DURATION: dict[str, float] = {"spike": 5.0, "drift": 14.0, "stuck": 12.0}
+
+
+def _level_factors(level: int) -> tuple[float, float]:
+    """Return (magnitude_factor, duration_factor) for a 1..5 level."""
+    lvl = max(1, min(5, int(level)))
+    return LEVEL_MAGNITUDE[lvl], LEVEL_DURATION[lvl]
+
 
 @dataclass
 class AnomalyOverlay:
@@ -317,29 +335,42 @@ class AnomalyOverlay:
     This is the streaming-time analogue of the offline injectors in
     notebook section 8; it is intentionally simple because real evaluation
     happens on the labelled eval dataset, not on live telemetry.
+
+    ``level`` (1..5) is the operator-selected global strength: it scales both
+    the deviation magnitude and the overlay duration so the effect is clearly
+    visible on the live charts. ``start`` records the onset epoch so the
+    control plane can shade the exact injected interval.
     """
 
     kind: str            # "spike" | "drift" | "stuck"
     sensor: str
     until: float
     duration: float
+    level: int = 3
+    start: float = 0.0
     stuck_value: float | None = None
 
     def apply(self, sample_dict: dict[str, float], now: float) -> float:
         """Return modified quality. Mutates sample_dict[self.sensor] in place."""
         v = sample_dict[self.sensor]
+        mag, _ = _level_factors(self.level)
         if self.kind == "spike":
-            sample_dict[self.sensor] = v + max(abs(v) * 0.5, 1.0) * random.uniform(1.5, 3.0)
-            return 0.6
+            # Sustained elevated band for the whole overlay window, with light
+            # jitter so it does not look like a flat clip. Magnitude grows with
+            # the level.
+            amp = max(abs(v) * 0.5, 1.0) * (1.5 + 1.5 * mag)
+            sign = 1.0 if v >= 0 else -1.0
+            sample_dict[self.sensor] = v + sign * amp * random.uniform(0.85, 1.15)
+            return max(0.0, 0.6 - 0.08 * self.level)
         if self.kind == "drift":
             t_in = 1.0 - max(0.0, self.until - now) / max(1e-6, self.duration)
-            sample_dict[self.sensor] = v + t_in * max(abs(v) * 0.4, 1.0)
-            return 0.7
+            sample_dict[self.sensor] = v + t_in * max(abs(v) * 0.4, 1.0) * (1.0 + mag)
+            return max(0.0, 0.7 - 0.07 * self.level)
         # stuck
         if self.stuck_value is None:
             self.stuck_value = v
         sample_dict[self.sensor] = self.stuck_value
-        return 0.4
+        return max(0.0, 0.4 - 0.05 * self.level)
 
 
 # ---------------------------------------------------------------------------
@@ -475,35 +506,33 @@ class SynthMachine:
         return f"mode={mode}"
 
 
-def maybe_trigger_overlay(now: float, sensor_names: list[str]) -> AnomalyOverlay:
+def maybe_trigger_overlay(
+    now: float, sensor_names: list[str], level: int = 3
+) -> AnomalyOverlay:
     kind = random.choice(["spike", "drift", "stuck"])
     sensor = random.choice(sensor_names)
-    if kind == "spike":
-        return AnomalyOverlay(kind, sensor, now + 0.5, 0.5)
-    if kind == "drift":
-        d = random.uniform(8.0, 20.0)
-        return AnomalyOverlay(kind, sensor, now + d, d)
-    d = random.uniform(5.0, 15.0)
-    return AnomalyOverlay(kind, sensor, now + d, d)
+    _, dur_factor = _level_factors(level)
+    # Light randomisation around the base duration, then scaled by the level.
+    base = BASE_DURATION[kind] * random.uniform(0.85, 1.2)
+    d = base * dur_factor
+    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now)
 
 
 def manual_overlay(
-    now: float, kind: str, sensor: str | None, sensor_names: list[str]
+    now: float, kind: str, sensor: str | None, sensor_names: list[str],
+    level: int = 3,
 ) -> AnomalyOverlay:
     """Build an overlay for an operator-requested manual injection.
 
     Like :func:`maybe_trigger_overlay` but with a caller-chosen ``kind`` and
-    optional ``sensor`` (random when omitted) and fixed, demo-friendly
-    durations so the effect is clearly visible.
+    optional ``sensor`` (random when omitted). Durations are scaled by the
+    global ``level`` so the injected band is clearly visible on the charts.
     """
     sensor = sensor or random.choice(sensor_names)
-    if kind == "spike":
-        return AnomalyOverlay("spike", sensor, now + 0.5, 0.5)
-    if kind == "drift":
-        d = 12.0
-        return AnomalyOverlay("drift", sensor, now + d, d)
-    d = 10.0
-    return AnomalyOverlay("stuck", sensor, now + d, d)
+    kind = kind if kind in BASE_DURATION else "spike"
+    _, dur_factor = _level_factors(level)
+    d = BASE_DURATION[kind] * dur_factor
+    return AnomalyOverlay(kind, sensor, now + d, d, level=level, start=now)
 
 
 
@@ -641,17 +670,23 @@ def run(
                     # Operator-requested manual injection takes priority over
                     # the random overlay and fires regardless of machine state.
                     ov_started = False
+                    ov_source = "random"
+                    level = control.get_level() if control is not None else 3
                     if ov is None and control is not None:
                         req = control.pop_injection(machine_id)
                         if req is not None:
-                            ov = manual_overlay(now, req.kind, req.sensor, m.sensor_names)
+                            ov = manual_overlay(
+                                now, req.kind, req.sensor, m.sensor_names, level
+                            )
                             active[machine_id] = ov
                             ov_started = True
+                            ov_source = "manual"
 
                     if ov is None and m.is_active() and random.random() < prob:
-                        ov = maybe_trigger_overlay(now, m.sensor_names)
+                        ov = maybe_trigger_overlay(now, m.sensor_names, level)
                         active[machine_id] = ov
                         ov_started = True
+                        ov_source = "random"
 
                     if ov is not None:
                         ov_quality = ov.apply(s, now)
@@ -697,6 +732,18 @@ def run(
                             "value":      round(float(ov.duration), 4),
                             "quality":    -1.0,
                         })
+                        # Record the injected interval so the control panel can
+                        # shade the affected period on the sensor charts.
+                        if control is not None:
+                            control.record_injection(
+                                machine_id,
+                                kind=ov.kind,
+                                sensor=ov.sensor,
+                                start=ov.start or now,
+                                end=ov.until,
+                                level=ov.level,
+                                source=ov_source,
+                            )
 
                 for chunk in chunked(events, batch_size):
                     batch = producer.create_batch()
