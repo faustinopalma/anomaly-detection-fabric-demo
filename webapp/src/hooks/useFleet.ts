@@ -1,21 +1,58 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ApiClient } from "../api/client";
-import type { ConnStatus, FleetSnapshot, HistoryResponse } from "../types";
+import type {
+  ConnStatus,
+  EventsResponse,
+  FleetSnapshot,
+  HistoryResponse,
+} from "../types";
 
 const POLL_MS = 2000;
 // Chart window. Must match the server-side retention (history_window_s) so a
 // reconnect can backfill the full visible range.
 const CHART_WINDOW_MS = 5 * 60 * 1000;
+// A Fabric detection is counted as "matched" (true positive) when it falls
+// inside an injected window, allowing for a lead before onset and a lag after
+// it ends (the model needs to observe a few samples before it reacts).
+const MATCH_LEAD_MS = 30 * 1000;
+const MATCH_LAG_MS = 120 * 1000;
 
 export interface SeriesPoint {
   t: number;
   v: number | null;
 }
 
+// Injection band in client-adjusted ms, for shading the chart of one sensor.
+export interface InjectionBand {
+  id: number;
+  kind: string;
+  sensor: string;
+  start: number;
+  end: number;
+  level: number;
+  source: string;
+}
+
+// Detection marker in client-adjusted ms. `matched` distinguishes a true
+// positive (lines up with an injection) from an unmatched detection (the model
+// flagged something with no injected ground truth).
+export interface DetectionMarker {
+  t: number;
+  score: number;
+  modelName: string;
+  sensorId: string | null;
+  matched: boolean;
+}
+
 interface Ring {
   t: number[];
   s: Record<string, (number | null)[]>;
+}
+
+interface MachineEventState {
+  injections: InjectionBand[];
+  detections: DetectionMarker[];
 }
 
 interface FleetState {
@@ -24,6 +61,8 @@ interface FleetState {
   lastUpdated: number | null;
   offlineDetail: string;
   getSeries: (machineId: string, sensor: string) => SeriesPoint[];
+  getInjections: (machineId: string, sensor: string) => InjectionBand[];
+  getDetections: (machineId: string, sensor: string) => DetectionMarker[];
 }
 
 /**
@@ -45,6 +84,8 @@ export function useFleet(
   // Per-machine rolling history in client-adjusted ms. Mutated in place; a
   // counter bump triggers re-render so the charts pick up new points.
   const ringRef = useRef<Map<string, Ring>>(new Map());
+  // Per-machine injection bands + Fabric detections, client-adjusted ms.
+  const eventsRef = useRef<Map<string, MachineEventState>>(new Map());
   // High-water mark (server epoch seconds) of the newest sample we hold, used
   // as `since` for incremental fetches. 0 forces a full-window backfill.
   const sinceRef = useRef(0);
@@ -83,6 +124,56 @@ export function useFleet(
       }
     }
     sinceRef.current = maxT;
+    setTick((x) => x + 1);
+  }, []);
+
+  const mergeEvents = useCallback((e: EventsResponse) => {
+    // Align server timestamps to the local clock, same as the history merge.
+    const offset = Date.now() - e.server_time * 1000;
+    const cutoff = Date.now() - CHART_WINDOW_MS;
+    const next = new Map<string, MachineEventState>();
+
+    for (const m of e.machines) {
+      const injections: InjectionBand[] = m.injections
+        .map((w) => ({
+          id: w.id,
+          kind: w.kind,
+          sensor: w.sensor,
+          start: w.start * 1000 + offset,
+          end: w.end * 1000 + offset,
+          level: w.level,
+          source: w.source,
+        }))
+        .filter((b) => b.end >= cutoff);
+      next.set(m.machine_id, { injections, detections: [] });
+    }
+
+    for (const d of e.detections) {
+      const t = d.t * 1000 + offset;
+      if (t < cutoff) continue;
+      let entry = next.get(d.machine_id);
+      if (!entry) {
+        entry = { injections: [], detections: [] };
+        next.set(d.machine_id, entry);
+      }
+      // A detection is matched when it lines up with any injection window on
+      // the same machine (the per-sensor refinement happens at render time for
+      // univariate detections). Multivariate detections (sensor_id null) match
+      // any window on the machine.
+      const matched = entry.injections.some((b) => {
+        if (d.sensor_id && b.sensor !== d.sensor_id) return false;
+        return t >= b.start - MATCH_LEAD_MS && t <= b.end + MATCH_LAG_MS;
+      });
+      entry.detections.push({
+        t,
+        score: d.score,
+        modelName: d.model_name,
+        sensorId: d.sensor_id,
+        matched,
+      });
+    }
+
+    eventsRef.current = next;
     setTick((x) => x + 1);
   }, []);
 
@@ -127,6 +218,12 @@ export function useFleet(
           const hist = (await hres.json()) as HistoryResponse;
           if (cancelled) return;
           mergeHistory(hist, full);
+
+          const eres = await client.getEvents();
+          if (cancelled || !eres.ok) return;
+          const evs = (await eres.json()) as EventsResponse;
+          if (cancelled) return;
+          mergeEvents(evs);
         }
       } catch {
         if (cancelled) return;
@@ -143,12 +240,13 @@ export function useFleet(
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, active, chartsOn, mergeHistory]);
+  }, [client, active, chartsOn, mergeHistory, mergeEvents]);
 
   // Clear accumulated history when charts are switched off.
   useEffect(() => {
     if (!chartsOn) {
       ringRef.current.clear();
+      eventsRef.current.clear();
       sinceRef.current = 0;
     }
   }, [chartsOn]);
@@ -161,5 +259,37 @@ export function useFleet(
     return ring.t.map((t, i) => ({ t, v: arr[i] ?? null }));
   }, []);
 
-  return { snapshot, status, lastUpdated, offlineDetail, getSeries };
+  // Injection bands to shade on a specific sensor chart.
+  const getInjections = useCallback(
+    (machineId: string, sensor: string): InjectionBand[] => {
+      const entry = eventsRef.current.get(machineId);
+      if (!entry) return [];
+      return entry.injections.filter((b) => b.sensor === sensor);
+    },
+    [],
+  );
+
+  // Detection markers to draw on a specific sensor chart. Univariate
+  // detections (sensor_id set) only render on their own sensor; multivariate
+  // detections (sensor_id null) render on every chart of the machine.
+  const getDetections = useCallback(
+    (machineId: string, sensor: string): DetectionMarker[] => {
+      const entry = eventsRef.current.get(machineId);
+      if (!entry) return [];
+      return entry.detections.filter(
+        (d) => d.sensorId == null || d.sensorId === sensor,
+      );
+    },
+    [],
+  );
+
+  return {
+    snapshot,
+    status,
+    lastUpdated,
+    offlineDetail,
+    getSeries,
+    getInjections,
+    getDetections,
+  };
 }

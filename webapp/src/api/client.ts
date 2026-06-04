@@ -42,10 +42,23 @@ export class ApiClient {
     return this.request(`/api/history?since=${encodeURIComponent(since)}`);
   }
 
+  /** Injection windows + Fabric detections for the chart overlays. */
+  async getEvents(): Promise<Response> {
+    return this.request("/api/events");
+  }
+
   async setRandom(machineId: string, enabled: boolean): Promise<Response> {
     return this.request(`/api/machines/${machineId}/random`, {
       method: "POST",
       body: JSON.stringify({ enabled }),
+    });
+  }
+
+  /** Set the global anomaly-strength level (1..5) for the whole fleet. */
+  async setLevel(level: number): Promise<Response> {
+    return this.request("/api/level", {
+      method: "POST",
+      body: JSON.stringify({ level }),
     });
   }
 
