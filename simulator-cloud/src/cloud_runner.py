@@ -33,6 +33,15 @@ Optional operator control plane (Static Web App backend):
   SIM_AUTH_CLIENT_ID       app registration client/audience GUID
   SIM_AUTH_ALLOW_APIKEY    set to "1" to also accept X-API-Key when auth on
 
+Optional Fabric anomaly-detection overlay (reads the KQL `anomalies` table
+so the panel can show when the model reacted; degrades gracefully):
+
+  SIM_FABRIC_QUERY_ENABLED set to "1" to start the Kusto poller
+  SIM_KUSTO_CLUSTER_URI    Fabric Eventhouse query URI
+  SIM_KUSTO_DATABASE       KQL database name (e.g. kql_telemetry)
+  SIM_FABRIC_POLL_INTERVAL_S poll cadence in seconds (default 15)
+  SIM_FABRIC_LOOKBACK_MIN    query look-back window in minutes (default 10)
+
 EVENTSTREAM_CONNECTION_STRING must be present in env (injected by ACA
 secret reference at deploy time).
 """
@@ -92,6 +101,14 @@ def _maybe_start_control():
     )
     mode = "Entra ID" if validator is not None else "shared key"
     print(f"[cloud_runner] control API listening on :{port} (auth: {mode})", flush=True)
+
+    # Optional Fabric anomaly-detection overlay (graceful if unavailable).
+    try:
+        import fabric_poller
+        fabric_poller.maybe_start_poller(control)
+    except Exception as exc:  # noqa: BLE001 — optional feature, never fatal
+        print(f"[cloud_runner] fabric poller not started: {exc}", flush=True)
+
     return control
 
 

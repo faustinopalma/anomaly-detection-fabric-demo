@@ -5,3 +5,5 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 pydantic>=2.6
 pyjwt[crypto]>=2.8
+azure-identity>=1.16
+azure-kusto-data>=4.4
