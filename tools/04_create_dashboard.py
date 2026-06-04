@@ -110,9 +110,11 @@ raw_telemetry
 
 
 # ---------------------------------------------------------------------------
-# CNC (M-003) sensor tiles — the CNC machine has its own 3-sensor set
-# (mandrino_load %, mandrino_power kW, mandrino_torque N*cm) that is not
-# covered by the synthetic-machine charts above.
+# CNC spindle sensor tiles — the CNC machines (M-002 synthgen replay and
+# M-003 real profile) share a 3-sensor set (mandrino_load %, mandrino_power
+# kW, mandrino_torque N*cm) that is not covered by the synthetic-machine
+# (FSM) charts above. Queries group by machine_id, so every machine emitting
+# these signals shows up automatically.
 # ---------------------------------------------------------------------------
 
 Q_CNC_LOAD = """\
@@ -344,7 +346,7 @@ def build_dashboard(workspace_id: str, database_id: str, cluster_uri: str, datab
         tile("False positives (spurious detections)",
              "Detections outside any injection window",
              0, 58, 24, 7, "table", Q_FP_TABLE, table_opts),
-        # --- CNC (M-003) sensor charts: only machines with these sensors show ---
+        # --- CNC (M-002, M-003) sensor charts: only machines with these sensors show ---
         tile("Spindle load [%] (CNC)", "mandrino_load — avg per machine, 10s bins",
              0, 65, 8, 7, "line", Q_CNC_LOAD, line_opts),
         tile("Spindle power [kW] (CNC)", "mandrino_power — avg per machine, 10s bins",
