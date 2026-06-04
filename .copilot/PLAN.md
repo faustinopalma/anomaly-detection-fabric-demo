@@ -1,6 +1,42 @@
 # Plan
 
-_Last updated: 2026-06-04 (synthgen hybrid synthetic CNC telemetry generator)_
+_Last updated: 2026-06-04 (M-002 replaced by synthgen CNC spindle, end-to-end)_
+
+## DONE — Replace M-002 with a synthgen-simulated CNC machine (live)
+
+User goal (Italian): swap M-002 in the live pipeline for a new synthgen CNC
+machine — in the simulator, in the Fabric inference, in the Fabric dashboard,
+and in the docs; wipe all existing Fabric data to restart; step by step with
+progressive commits + deploys, testing at each step.
+
+- ✅ Step 1 — `tools/build_synth_trace.py`: fit synthgen on the real CNC
+  telemetry, generate a 1 Hz 24 h trace (86 400 steps, duty 99.6% vs real
+  99.2%; marginals near-identical), clamp to real ranges. Artifacts:
+  `_local/synthgen/synth_trace_full.npz` (gitignored) +
+  `simulator-cloud/src/synth_trace_M-002.json` (4 h, 14 400 steps, committed).
+- ✅ Step 2 — `SynthMachine` in `simulate_machines.py` loops the trace behind
+  the same polymorphic interface as `CNCMachine`; wired through
+  `build_machines`, CLI (`--synth-trace`/`--synth-machine-id`), `cloud_runner`
+  (`SIM_SYNTH_PROFILE`/`SIM_SYNTH_MACHINE`), `deploy.ps1`, `Dockerfile`.
+- ✅ Step 3 — `tools/train_m002_synth.py`: retrain the M-002 TransformerAE on
+  the synthgen trace (3 mandrino_* features); FP16 ONNX (492 KB) fits the
+  Kusto row budget, parity 3.2e-5, threshold p99.5=3.60. Overwrote
+  `models/transformer_ae_small__M-002/`.
+- ✅ Step 4 — wiped all Fabric data (`tools/clear_history.py`: raw_telemetry,
+  anomalies, injected_anomalies → 0 rows; re-cleared after cutover to drop the
+  transient FSM residue).
+- ✅ Step 5 — registered the new M-002 model (`tools/05_register_model.py`,
+  version 2 with mandrino_* sensors). `fn_score_demo_M002()` + update policy
+  were already generic (read sensors/threshold from metadata) → no KQL change.
+- ✅ Step 6 — built image `acrsimnsb7uf.azurecr.io/simulator:synth1`, deployed
+  to Container App `ca-simulator` (rev `v2606042001`, healthy). Verified live
+  ingest: M-002 emits only `mandrino_load/power/torque`; 22 sensors total.
+- ✅ Step 7 — `tools/04_create_dashboard.py`: CNC tiles already group by
+  machine_id → M-002 appears alongside M-003; redeployed dashboard
+  `rtd_telemetry_live`.
+- ✅ Step 8 — docs updated (architecture, data_modeling, model_architecture,
+  RUNBOOK, root + simulator READMEs) + this PLAN + STATE + repo memory.
+- ✅ Step 9 — final e2e verification (M-002 scored detections in `anomalies`).
 
 ## DONE — synthgen: SOTA hybrid synthetic data generator (local + Azure ML)
 

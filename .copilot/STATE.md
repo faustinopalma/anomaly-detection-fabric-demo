@@ -1,8 +1,52 @@
 # Current state
 
-_Last updated: 2026-06-04 (synthgen AML job submitted: goofy_chin_4c2qx9bn5v; storage firewall opened+restored)_
+_Last updated: 2026-06-04 (M-002 replaced by synthgen CNC spindle, live e2e)_
 
-## Latest session (2026-06-04) — synthgen: SOTA hybrid synthetic CNC telemetry generator
+## Latest session (2026-06-04) — M-002 → synthgen CNC spindle (DEPLOYED)
+
+Goal (user, Italian): replace M-002 in the live pipeline with a new
+synthgen-simulated CNC machine — in the simulator, the Fabric inference, the
+Fabric dashboard and the docs; wipe all Fabric data to restart; step by step,
+progressive commits + deploys, test at each step.
+
+**Done (all 9 steps):**
+- `tools/build_synth_trace.py` fits synthgen on the real CNC telemetry and
+  emits a 1 Hz replay trace; `_local/synthgen/synth_trace_full.npz` (24 h,
+  86 400 steps, gitignored) + `simulator-cloud/src/synth_trace_M-002.json`
+  (4 h, 14 400 steps, committed). Duty 99.6% vs real 99.2%; marginals match.
+  Used `--reuse-bundle` + a `_generate_signals()` that skips the slow timing
+  model (the per-step Python loop was the bottleneck) and downsamples to 1 Hz.
+- `SynthMachine` (in `simulate_machines.py`) loops the trace behind the same
+  polymorphic interface as `CNCMachine`; wired through `build_machines`, the
+  CLI, `cloud_runner` (`SIM_SYNTH_PROFILE`/`SIM_SYNTH_MACHINE`), `deploy.ps1`
+  (`-SynthProfile`/`-SynthMachineId`, default M-002) and the `Dockerfile`.
+- `tools/train_m002_synth.py` retrained `models/transformer_ae_small__M-002/`
+  on the synthgen trace (3 mandrino_* features). FP16 ONNX 492 KB, parity
+  3.2e-5, threshold p99.5 = 3.60.
+- Wiped Fabric data (`tools/clear_history.py`) before and after the cutover.
+- Registered M-002 model version 2 (mandrino_* sensors). `fn_score_demo_M002()`
+  + update policy were already generic → no KQL change.
+- Built `acrsimnsb7uf.azurecr.io/simulator:synth1`, deployed to `ca-simulator`
+  (rev `ca-simulator--v2606042001`, healthy). **NOTE:** the in-script
+  `az containerapp update` silently produced no new revision the first time;
+  re-ran the update manually with `--image …:synth1 --revision-suffix … 
+  --set-env-vars SIM_SYNTH_PROFILE/SIM_SYNTH_MACHINE` (which preserves the
+  existing control-plane env vars) → new revision came up healthy.
+- Verified live: M-002 emits only `mandrino_load/power/torque`; 22 sensors
+  total across the 4 machines. Dashboard CNC tiles now show M-002 + M-003.
+- Docs updated (architecture, data_modeling, model_architecture, RUNBOOK,
+  root + simulator READMEs).
+
+**Live resources (confirmed this session):** sub
+`7ecf802f-04ac-4e81-8703-c3d39074f823` (`ME-MngEnvMCAP699805-faustopalma-1`),
+RG `rg-fabric-demo`, region `italynorth`, ACR `acrsimnsb7uf`, Container App
+`ca-simulator` (FQDN `ca-simulator.thankfulground-943b41a0.italynorth.azurecontainerapps.io`).
+Fabric: workspace `anomaly-detection-fresh`, KQL DB `kql_telemetry`, cluster
+`trd-53389re9vz38nbzpgn.z5.kusto.fabric.microsoft.com`. `.env` at repo root
+holds the real values (FABRIC_* + EVENTSTREAM_CONNECTION_STRING, entity
+`esehitnfrrdlj1y644v1isl_eh`).
+
+## Earlier session (2026-06-04) — synthgen: SOTA hybrid synthetic CNC telemetry generator
 
 Goal (user, Italian): build a state-of-the-art synthetic data generator that
 mimics the real CNC spindle telemetry as faithfully as possible; methodology
