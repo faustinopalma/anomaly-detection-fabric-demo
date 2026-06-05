@@ -1,6 +1,44 @@
 # Current state
 
-_Last updated: 2026-06-04 (detection-quality calibration: scale-aware injections + per-model thresholds + spike duration, DEPLOYED synth5; container scaled to 0 + Fabric capacity suspended)_
+_Last updated: 2026-06-05 (M-002 synthgen trace fidelity AUDIT: shipped trace is OUT OF DISTRIBUTION — variance collapse; root cause = failed AML GPU job, trace was a local under-fit fallback)_
+
+## Latest session (2026-06-05) — M-002 synthgen trace fidelity audit (FAIL: variance collapse)
+
+User (Italian): noticed the M-002 generator AML job failed; unsure whether the
+values M-002 emits today are aligned with the real sample. Asked to verify.
+
+**Findings (no infra changes):**
+- AML job `goofy_chin_4c2qx9bn5v` (ws `anomalyml-mlw`) status = **Failed**,
+  `StartTimeUtc == EndTimeUtc == 2026-06-04 17:02:17` → failed *instantly* at
+  compute start (gpu-t4-cluster) — an env/image/allocation failure, not a
+  training crash. Exact stderr unreadable from local: AML default storage
+  `stanomalymlfknlnf4v` is `publicNetworkAccess=Disabled` + needs Storage Blob
+  Data Reader → log blob listing returns `AuthorizationFailure`. See studio URL.
+- The shipped trace `simulator-cloud/src/synth_trace_M-002.json` and the full
+  npz are both dated **2026-06-04 19:31 local** = AFTER the cloud job failed
+  (19:02 CEST) → the trace was produced by the LOCAL fallback
+  (`tools/build_synth_trace.py`, CPU, ~80 epochs, 7-day subset) which under-fit.
+- **Fidelity verdict = FAIL** (new tool `tools/_verify_synth_trace.py`, compares
+  active-sample marginals/quantiles/correlations of the shipped trace vs
+  `_data_local/cnc_real_wide.parquet`, NaN-aware):
+  - Means/medians MATCH (load Δ0.8%, power Δ5.2%, torque Δ2.8%) — centre is right.
+  - **Std collapsed to ~1/3 of real** (load 18.2→6.2, power 13.9→4.7,
+    torque 5249→1752; ≈ −66% on ALL three — classic diffusion variance/mode
+    collapse).
+  - Tails compressed: real load p95 47.8→12.7, torque range [−8040,13810]→
+    [−73,4591]; real has regen negatives the synth never reaches.
+  - Cross-signal corr weaker (power~torque 0.98→0.83).
+- **Conclusion:** M-002 is NOT wildly wrong in magnitude (averages fine) but is
+  too "smooth" — it under-represents the real spread/dynamics. Its anomaly model
+  was trained on the same trace (train/serve consistent) so internally coherent.
+- **Recommendation (NOT auto-executed — costly/affects live container):** fix
+  the AML GPU job (check quota/env image build via studio logs; may need to
+  re-open `stanomalymlfknlnf4v` firewall briefly) and re-run notebook 08 with
+  full data/300 epochs, OR rebuild locally with more epochs+full data
+  (`tools/build_synth_trace.py --subset-days 0 --epochs <big>`), then rebuild +
+  redeploy the simulator image and re-register the M-002 model.
+
+---
 
 ## Latest session (2026-06-04) — detection-quality calibration end-to-end (DEPLOYED synth5, then teardown)
 
