@@ -1,6 +1,38 @@
 # Current state
 
-_Last updated: 2026-06-05 (FALSE POSITIVES FIXED & DEPLOYED via activity gate; GPU M-002 retrain blocked by storage shared-key config — pending user decision)_
+_Last updated: 2026-06-05 (M-004 missed-detection ROOT-CAUSED & FIXED via threshold recalibration; earlier: FALSE POSITIVES fixed via activity gate; GPU retrain blocked by storage shared-key config)_
+
+## Latest session (2026-06-05, cont.) — M-004 missed `temperature_bearing` injection FIXED
+
+User (Italian): asked whether a missed M-004 detection on the dashboard
+(visible `temperature_bearing` step to ~82, ~11:32 local / 09:32 UTC) was an
+interface miss or a model failure, and to retrain "without blocking" if needed.
+
+**Diagnosis (tools/_inspect_fires.py, tools/_separate_scores.py):**
+- NOT an interface miss, NOT the activity gate (activity was 0.86, >> 0.5).
+- The `temperature_bearing` spike scored only **5.28** vs the old threshold
+  **12.0** → genuinely below threshold → no detection fired (correct behaviour).
+- Score = `per_sensor.max(mean_over_time MSE)` (max over sensors of the
+  time-averaged MSE). A single-sensor spike lasting ~20-28s in a 64s window is
+  **time-diluted** → low score. Retraining the same architecture/distribution
+  would NOT fix this → threshold recalibration is the correct, non-blocked fix.
+- **12h per-injection separation (M-004, active windows, gate 0.5):**
+  pressure spike 34.75 ✅, vibration drift 68.27 ✅, pressure spike 14.94 ✅,
+  **temperature_bearing spike 5.28** (was missed), temperature_motor spike 2.15,
+  vibration stuck 1.84. **Normal-active max 3.25** (p90 2.11).
+
+**Fix (DEPLOYED):** M-004 threshold **12.0 → 4.0** (above normal-active max 3.25,
+below temperature_bearing 5.28). Re-registered → **version 3** in `models`.
+Verified live (tools/_verify_fix.py 12h, gate 0.5): M-001 2TP/0FP, M-002 5TP/0FP,
+M-003 11TP/0FP, **M-004 5TP/0FP** (now 5 of 6 injections caught, was 3 of 6).
+
+**Known residual limitation (documented, NOT a bug):** `temperature_motor` spike
+(~2.15) and `vibration stuck` (~1.84) fall **below** normal-active noise (3.25)
+→ NOT separable by any threshold. These are reconstruction-AE blind spots
+(a frozen/stuck signal is reconstructed well → low error; a small single-sensor
+spike is time-diluted). Fixing them needs an architecture/score change
+(e.g. per-timestep max, or a dedicated detector), not a retrain of the same net.
+New tool: `tools/_separate_scores.py` (normal vs in-band score separation).
 
 ## Latest session (2026-06-05) — false positives ROOT-CAUSED & FIXED (activity gate)
 

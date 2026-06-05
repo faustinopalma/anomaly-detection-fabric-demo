@@ -11,8 +11,8 @@
   "n_dec_layers": 2,
   "ff_dim": 160,
   "n_parameters": 161984,
-  "threshold": 12.0,
-  "threshold_rule": "live-calibrated: normal max ~8.36 (3h), injections >=16.9; raised from 1.47 to remove false positives",
+  "threshold": 4.0,
+  "threshold_rule": "live-calibrated with activity gate (12h): normal-active max 3.25 (p90 2.11); separable injections >=5.28 (temperature_bearing spike), >=14.9 (pressure spike), 68 (vibration drift). Lowered 12.0 -> 4.0 to catch single-sensor temperature spikes while staying above normal-active noise. NOTE: temperature_motor spike (~2.15) and vibration stuck (~1.84) fall below normal-active noise and are NOT separable by threshold (reconstruction-AE blind spot; would need architecture change, not retraining).",
   "data_source": "synthetic_physics_simulator",
   "training": {
     "epochs": 12,
