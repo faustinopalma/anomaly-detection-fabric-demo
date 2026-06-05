@@ -1,6 +1,60 @@
 # Current state
 
-_Last updated: 2026-06-05 (M-004 missed-detection ROOT-CAUSED & FIXED via threshold recalibration; earlier: FALSE POSITIVES fixed via activity gate; GPU retrain blocked by storage shared-key config)_
+_Last updated: 2026-06-05 (transformer-ridotto retrain M-001+M-004 evaluated & NOT deployed — empirical regression; export bug fixed in cloud trainer; verified models kept live)_
+
+## Latest session (2026-06-05, cont.²) — retrain transformer ridotto M-001+M-004: VALUTATO, NON deployato
+
+User (Italian): "il modello attuale non è un transformer? avevamo deciso di
+usare il transformer ridotto, quello migliore. procedi al training di quello
+per tutte le macchine ed esegui il deploy." (User unavailable; work autonomously.)
+
+**Scope:** "tutte le macchine" = only **M-001 + M-004** (8-sensor physics models
+trainable by `cloud-training/src/generate_and_train.py`). M-002 (3-sensor
+synthgen) and M-003 (3-sensor CNC profile) are notebook-bound and were left
+**untouched** (running the 8-sensor trainer would destroy them; both at 0 FP).
+
+**Genuine bug fixed (committed 003ee40):** torch 2.11 defaults to the dynamo
+ONNX exporter → FP16 with external `.onnx.data` sidecar (b64 ~1185 KB > 1 MB
+Kusto budget) + runtime Reshape error. Forced `dynamo=False` +
+`do_constant_folding=True` on both exports → compact single-file 493 KB ONNX
+(b64 658 KB, fits=True), parity <0.2%. Validated in isolation (tools/_export_test.py).
+
+**Retrain evaluated → REGRESSION → NOT deployed (safety gate):** trained both
+machines (8h synth, 12 epochs, CPU). Calibrated on LIVE data with provisional
+high threshold + tools/_separate_scores.py:
+- **M-004 retrain regressed badly**: normal-active **max 1313** (OOD transient
+  amplified) vs deployed model's clean **3.25**; injections topped at 77 → NO
+  threshold separates them. Reverted to the committed verified model (thr 4.0).
+- **M-001 retrain thinner margin**: normal-active max 2.107 vs injection cluster
+  2.63 (margin 0.5) — weaker than the deployed model (normal ~1.57, thr 2.5).
+  Reverted to the committed verified model (thr 2.5).
+- A max-over-time scoring blend (alpha=0.5) was also trialled and **scrapped**
+  (amplified normal noise more than weak signals); kept `TIME_AGG_ALPHA=1.0`.
+
+**Conclusion (confirms prior analysis):** a plain retrain does NOT improve
+detection — the residual blind spots are architectural (reconstruction-AE),
+not under-training. Both **verified models re-registered live** (M-001 v6 thr 2.5,
+M-004 v6 thr 4.0); on-disk artifacts are byte-identical to git HEAD. Fleet
+remained 0 FP in the last clean 12h verify (M-004 7TP/0FP at thr 4.0). New tools:
+tools/_export_test.py, tools/_check_model_versions.py.
+
+**Live-data drift note (NOT introduced by this task, observed on the verified
+models):** a fresh 3h verify showed sporadic FPs on the verified/deployed models
+(M-001 1FP, M-003 1FP, M-004 1FP; M-002 0FP) caused by very recent out-of-
+distribution transient windows that pass the activity gate yet score high
+(e.g. M-004 normal-active window at ~202 over the last 2h, with no injection
+nearby; the prior 12h window had a clean normal max of 3.25). These are the same
+OOD phenomenon the activity gate targets, but these windows have activity≥0.5.
+This is independent of the retrain — the retrain made it strictly worse
+(M-004 retrain normal-active max 1313 vs deployed 202/3.25). A follow-up could
+tighten the gate or add an OOD/robust-score guard, but a retrain is not the fix.
+
+**KQL python() sandbox throttling:** running many heavy scoring queries in quick
+succession trips `0x80DA0007 / Partial query failure 0x80131500` (sandbox
+resource limit) and `429 KustoThrottlingError` on rapid re-registers. Transient —
+space out queries and retry.
+
+## Latest session (2026-06-05, cont.) — M-004 missed `temperature_bearing` injection FIXED
 
 ## Latest session (2026-06-05, cont.) — M-004 missed `temperature_bearing` injection FIXED
 
