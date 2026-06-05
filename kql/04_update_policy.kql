@@ -39,7 +39,11 @@
         bin        = 1s,
         threshold  = threshold
     )
-    | where is_anomaly
+    // Activity gate: skip windows where the machine is idle/off OR only at
+    // partial load (activity < 0.5). The AE is trained on full-load running
+    // data, so off and ramp/partial windows are out-of-distribution and
+    // produce huge spurious scores.
+    | where activity >= 0.5 and is_anomaly
     | project
         detected_at, machine_id,
         sensor_id    = '',           // multivariate score: not tied to a single sensor
@@ -60,7 +64,7 @@
         bin        = 1s,
         threshold  = threshold
     )
-    | where is_anomaly
+    | where activity >= 0.5 and is_anomaly
     | project
         detected_at, machine_id,
         sensor_id    = '',
@@ -81,7 +85,7 @@
         bin        = 1s,
         threshold  = threshold
     )
-    | where is_anomaly
+    | where activity >= 0.5 and is_anomaly
     | project
         detected_at, machine_id,
         sensor_id    = '',
@@ -102,7 +106,7 @@
         bin        = 1s,
         threshold  = threshold
     )
-    | where is_anomaly
+    | where activity >= 0.5 and is_anomaly
     | project
         detected_at, machine_id,
         sensor_id    = '',

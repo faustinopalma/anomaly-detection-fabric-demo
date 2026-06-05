@@ -274,12 +274,13 @@ else:
     build_multivariate_windows_batch(machine, sensors, win_size, bin)
     | extend model_b64 = model_b64, sensors = sensors, meta_json = meta_json
     | evaluate python(
-        typeof(*, score:real),
+        typeof(*, score:real, activity:real),
 ```
 import base64, json, numpy as np, onnxruntime as ort
 if len(df) == 0:
     result = df.copy()
     result['score'] = np.array([], dtype=float)
+    result['activity'] = np.array([], dtype=float)
 else:
     b64 = df['model_b64'].iloc[0]
     sensors = list(df['sensors'].iloc[0])
@@ -294,10 +295,20 @@ else:
     for row in df['values']:
         mat = np.array([[step.get(s, 0.0) for s in sensors] for step in row], dtype=np.float32)
         batch.append(mat)
-    X = (np.stack(batch) - mean) / std
+    X_raw = np.stack(batch)
+    X = (X_raw - mean) / std
     out = sess.run(None, {input_name: X})[0].reshape(-1)
+    # Activity gate signal: scale-free ratio of each window's per-sensor mean
+    # to the training operating point (scaler mean). ~1 when the machine runs
+    # at the trained regime, ~0 when idle/off (all sensors near zero). Sensors
+    # whose training mean is ~0 are ignored (nan); median is robust to outliers.
+    raw_mean = X_raw.mean(axis=1)
+    mean_safe = np.where(np.abs(mean) < 1e-3, np.nan, mean)
+    ratio = raw_mean / mean_safe
+    activity = np.nanmedian(ratio, axis=1)
     result = df.copy()
     result['score'] = out
+    result['activity'] = activity.astype(float)
 ```
     )
     | project-away model_b64, sensors, meta_json
@@ -328,12 +339,13 @@ else:
     build_multivariate_windows_lookback(machine, sensors, win_size, bin, lookback)
     | extend model_b64 = model_b64, sensors = sensors, meta_json = meta_json
     | evaluate python(
-        typeof(*, score:real),
+        typeof(*, score:real, activity:real),
 ```
 import base64, json, numpy as np, onnxruntime as ort
 if len(df) == 0:
     result = df.copy()
     result['score'] = np.array([], dtype=float)
+    result['activity'] = np.array([], dtype=float)
 else:
     b64 = df['model_b64'].iloc[0]
     sensors = list(df['sensors'].iloc[0])
@@ -348,10 +360,20 @@ else:
     for row in df['values']:
         mat = np.array([[step.get(s, 0.0) for s in sensors] for step in row], dtype=np.float32)
         batch.append(mat)
-    X = (np.stack(batch) - mean) / std
+    X_raw = np.stack(batch)
+    X = (X_raw - mean) / std
     out = sess.run(None, {input_name: X})[0].reshape(-1)
+    # Activity gate signal: scale-free ratio of each window's per-sensor mean
+    # to the training operating point (scaler mean). ~1 when the machine runs
+    # at the trained regime, ~0 when idle/off (all sensors near zero). Sensors
+    # whose training mean is ~0 are ignored (nan); median is robust to outliers.
+    raw_mean = X_raw.mean(axis=1)
+    mean_safe = np.where(np.abs(mean) < 1e-3, np.nan, mean)
+    ratio = raw_mean / mean_safe
+    activity = np.nanmedian(ratio, axis=1)
     result = df.copy()
     result['score'] = out
+    result['activity'] = activity.astype(float)
 ```
     )
     | project-away model_b64, sensors, meta_json
