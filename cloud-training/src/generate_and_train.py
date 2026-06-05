@@ -56,6 +56,16 @@ N_DEC = 2
 FF_DIM = 160
 DROPOUT = 0.1
 
+# Time-aggregation of the per-timestep reconstruction error within a window.
+# score = max_over_sensors( alpha*mean_t(err) + (1-alpha)*max_t(err) ).
+# alpha=1.0 = legacy mean-over-time score (production default). A max-over-time
+# blend (alpha=0.5) was trialled to rescue brief single-sensor spikes, but on
+# live data it amplified normal-running transients far more than the weak
+# signals (M-004 normal-active max jumped 3.25 -> 4174), regressing
+# separability. Kept at 1.0; brief-spike blind spots are an inherent limit of
+# reconstruction AEs and are addressed by per-machine threshold calibration.
+TIME_AGG_ALPHA = 1.0
+
 BATCH = 256
 EPOCHS = 12
 LR = 3e-4
@@ -242,6 +252,19 @@ class TransformerAE(nn.Module):
         return self.output_head(y)
 
 
+def time_aggregate(err: torch.Tensor, alpha: float = TIME_AGG_ALPHA) -> torch.Tensor:
+    """Aggregate per-timestep error ``[B, T, S]`` to a scalar score ``[B]``.
+
+    Per sensor, blend the window-mean error (sustained-anomaly sensitivity)
+    with the worst-timestep error (spike sensitivity), then take the worst
+    sensor. ONNX-exportable (mean/max/add/mul only).
+    """
+    mean_t = err.mean(dim=1)
+    max_t = err.max(dim=1).values
+    per_sensor = alpha * mean_t + (1.0 - alpha) * max_t
+    return per_sensor.max(dim=1).values
+
+
 class ScoreWrapper(nn.Module):
     def __init__(self, ae: nn.Module) -> None:
         super().__init__()
@@ -250,8 +273,7 @@ class ScoreWrapper(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_hat = self.ae(x)
         err = (x_hat - x) ** 2
-        per_sensor = err.mean(dim=1)
-        return per_sensor.max(dim=1).values
+        return time_aggregate(err)
 
 
 class ScoreWrapperFP16(nn.Module):
@@ -263,8 +285,7 @@ class ScoreWrapperFP16(nn.Module):
         x16 = x.half()
         x_hat = self.ae(x16)
         err = (x_hat - x16) ** 2
-        per_sensor = err.mean(dim=1)
-        return per_sensor.max(dim=1).values.float()
+        return time_aggregate(err).float()
 
 
 def composite_loss(x_hat: torch.Tensor, x: torch.Tensor, lam_delta: float = 0.1) -> torch.Tensor:
@@ -298,8 +319,7 @@ def score_windows(model: nn.Module, X: np.ndarray, device: torch.device, batch: 
         xb = torch.from_numpy(X[i:i + batch]).to(device, non_blocking=True)
         x_hat = model(xb)
         err = (x_hat - xb) ** 2
-        per_sensor = err.mean(dim=1)
-        out[i:i + batch] = per_sensor.max(dim=1).values.detach().cpu().numpy()
+        out[i:i + batch] = time_aggregate(err).detach().cpu().numpy()
     return out
 
 
@@ -399,7 +419,7 @@ def train_one(machine: str, df: pd.DataFrame, out_root: Path,
         export_model, dummy, onnx_fp32.as_posix(),
         input_names=["window"], output_names=["score"],
         dynamic_axes={"window": {0: "batch"}, "score": {0: "batch"}},
-        opset_version=17, do_constant_folding=True)
+        opset_version=17, do_constant_folding=True, dynamo=False)
     mp32 = onnx.load(onnx_fp32.as_posix())
     if mp32.ir_version > SANDBOX_IR_VERSION:
         mp32.ir_version = SANDBOX_IR_VERSION
@@ -411,7 +431,7 @@ def train_one(machine: str, df: pd.DataFrame, out_root: Path,
         fp16_model, dummy, onnx_fp16.as_posix(),
         input_names=["window"], output_names=["score"],
         dynamic_axes={"window": {0: "batch"}, "score": {0: "batch"}},
-        opset_version=17, do_constant_folding=True)
+        opset_version=17, do_constant_folding=True, dynamo=False)
     mp16 = onnx.load(onnx_fp16.as_posix())
     if mp16.ir_version > SANDBOX_IR_VERSION:
         mp16.ir_version = SANDBOX_IR_VERSION
