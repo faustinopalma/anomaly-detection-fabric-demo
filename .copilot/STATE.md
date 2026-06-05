@@ -1,6 +1,61 @@
 # Current state
 
-_Last updated: 2026-06-05 (M-002 synthgen trace fidelity AUDIT: shipped trace is OUT OF DISTRIBUTION — variance collapse; root cause = failed AML GPU job, trace was a local under-fit fallback)_
+_Last updated: 2026-06-05 (FALSE POSITIVES FIXED & DEPLOYED via activity gate; GPU M-002 retrain blocked by storage shared-key config — pending user decision)_
+
+## Latest session (2026-06-05) — false positives ROOT-CAUSED & FIXED (activity gate)
+
+User (Italian): "procedi pure alla correzione ... vedo anche molti falsi
+positivi (linee tratteggiate) ... forse tutti i modelli vanno riaddestrati su
+GPU Azure ... fai tutto il necessario per correggere fino in fondo."
+
+**Root cause of the false positives (the dashed lines) — NOT thresholds, NOT
+training:**
+- Inspecting raw telemetry during the high-score bursts (e.g. M-001 score 6537
+  held flat for ~15 min) showed **all sensors ~0 → the machine was OFF/idle**
+  (current 0.07 vs 7.5 running, spindle 108 vs 2983). The AE is trained only on
+  running data, so idle/off windows are out-of-distribution → huge spurious
+  scores. **No threshold can fix this** (6537 > any sane threshold). The
+  premise that GPU retraining would fix the FPs was wrong.
+
+**Fix (DEPLOYED to live KQL DB `kql_telemetry`):**
+1. **Activity gate.** Added an `activity` column to both multivariate scorers
+   (`kql/03_scoring_functions.kql`, batch + lookback): scale-free
+   `nanmedian(window_mean / scaler_mean)` ≈ 1 when running at the trained
+   regime, ≈ 0 when idle. typeof now `(*, score:real, activity:real)`.
+   The 4 per-machine `fn_score_demo_M00X` (`kql/04_update_policy.kql`) now
+   filter `| where activity >= 0.5 and is_anomaly`. Calibrated 0.5 from live
+   data: idle/partial-load windows (activity < 0.5) carried ALL the high-score
+   FPs; real injections sit at activity 0.85–1.2.
+2. **M-001 threshold** 1.007 → **2.5** (active-window normal max ~1.57);
+   re-registered → **version 2** in the `models` table.
+3. M-002 (4), M-003 (1.882), M-004 (12) thresholds already well-placed → left
+   unchanged.
+
+**Verified on live data (tools/_verify_fix.py, gate 0.5, 3h):** M-001 0 fires/0
+FP, M-002 2 TP/0 FP, M-003 7 TP/0 FP, M-004 2 TP/0 FP. From ~103 FP → **0**, no
+injections lost. New batches are clean; pre-gate FP rows in `anomalies` age out.
+
+**GPU M-002 retrain — TRUE failure cause found, now BLOCKED (pending decision):**
+- The repeated AML `ImageBuildFailure` was NOT conda/pip. Real error from
+  `imgbldrun_e3f8185`: *"Failed to download snapshot from storage using SAS url
+  ... AuthorizationFailure ... stanomalymlfknlnf4v"*. Storage has
+  `allowSharedKeyAccess=false`; the image-build-on-compute pulls the code
+  snapshot via a shared-key SAS → rejected. The cluster `gpu-t4-cluster` has
+  **no managed identity** (identity.type=null).
+- Unblocking needs a storage-security / infra change (A: temp enable shared key;
+  B: assign MI + Storage Blob Data Reader RBAC) → NOT done autonomously while
+  unattended. Option C (defer) chosen: M-002 currently works (0 FP/2 TP); only
+  its synthetic-trace *realism* (variance collapse) would improve with the GPU
+  retrain. Decision recorded for the user.
+- New diagnostic/verification tools added: `tools/_inspect_detections.py`,
+  `_inspect_telemetry_window.py`, `_inspect_activity.py`, `_recalibrate_active.py`,
+  `_verify_fix.py`, `_inspect_fires.py`, `_count_false_positives.py`,
+  `_aml_job_error.py`.
+- Storage firewall left RESTORED (publicNetworkAccess=Disabled, defaultAction=Allow).
+
+---
+
+_Earlier note: 2026-06-05 (M-002 synthgen trace fidelity AUDIT: shipped trace is OUT OF DISTRIBUTION — variance collapse; root cause = failed AML GPU job, trace was a local under-fit fallback)_
 
 ## Latest session (2026-06-05) — M-002 synthgen trace fidelity audit (FAIL: variance collapse)
 

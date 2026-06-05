@@ -1,8 +1,53 @@
 # Plan
 
-_Last updated: 2026-06-04 (detection calibration DONE + deployed synth5 + teardown)_
+_Last updated: 2026-06-05 (false positives FIXED via activity gate + M-001 threshold; GPU M-002 retrain pending user decision)_
 
-## DONE — Fix detection coverage/calibration end-to-end (DEPLOYED synth5, teardown done)
+## DONE — Eliminate false positives via activity gate (DEPLOYED to live KQL)
+
+User goal (Italian): many false positives (dashed lines on the dashboard);
+"fai tutto il necessario per correggere fino in fondo"; suspected all models
+needed GPU retraining.
+
+Diagnosis (tools `_inspect_detections.py`, `_inspect_telemetry_window.py`,
+`_inspect_activity.py`, `_count_false_positives.py`, live KQL):
+
+- The high-score "false positives" (5000–6500) were **idle/off-machine windows**
+  (all sensors ~0). The AE only ever saw running data → off windows are OOD →
+  huge reconstruction error. No threshold fixes this. GPU retraining would NOT
+  have fixed the FPs (wrong premise).
+- M-001 additionally had a too-low threshold (1.007) that also flagged some
+  normal *running* windows (~1.1–1.6).
+
+Outcome:
+- ☑ Step 1 — Activity gate. Added scale-free `activity` =
+  `nanmedian(window_mean / scaler_mean)` to both multivariate scorers in
+  `kql/03_scoring_functions.kql` (typeof → `(*, score:real, activity:real)`).
+  The 4 `fn_score_demo_M00X` in `kql/04_update_policy.kql` now filter
+  `activity >= 0.5 and is_anomaly`. Gate 0.5 calibrated from live buckets
+  (idle/partial < 0.5 carried all FPs; injections at 0.85–1.2). Deployed via
+  `tools/02_setup_kql_tables.py`.
+- ☑ Step 2 — M-001 threshold 1.007 → 2.5 (active-window normal max ~1.57);
+  `models/transformer_ae_small__M-001/metadata.json` edited, re-registered v2.
+  M-002/M-003/M-004 thresholds unchanged.
+- ☑ Step 3 — Verified live (`tools/_verify_fix.py`, gate 0.5, 3h): all four
+  machines 0 FP, no injections lost (M-001 0, M-002 2 TP, M-003 7 TP,
+  M-004 2 TP). ~103 FP → 0.
+
+## PENDING (user decision) — GPU retrain of M-002 synthetic trace
+
+- AML `ImageBuildFailure` true cause = storage `allowSharedKeyAccess=false`
+  blocks the build agent's shared-key SAS snapshot download; cluster has no MI.
+- Options recorded for the user: (A) temp enable shared key, (B) MI + RBAC,
+  (C) defer. NOT executed autonomously (security/infra change, unattended).
+- M-002 works today (0 FP / 2 TP); only synthetic-trace realism (variance
+  collapse) would improve. When unblocked: re-run `tools/_submit_synthgen_gpu.py`
+  → `aml.download_model` → `tools/build_synth_trace.py --reuse-bundle
+  --subset-days 0` → `tools/_verify_synth_trace.py --full` (PASS/WARN) →
+  retrain + re-register M-002 → rebuild/redeploy simulator image.
+
+---
+
+## DONE (2026-06-04) — Fix detection coverage/calibration end-to-end (DEPLOYED synth5, teardown done)
 
 User goal (Italian): M-001/M-002/M-003 "never" flagged by the model; M-004
 flagged but with false positives. Investigate end-to-end and fix. Proceed
