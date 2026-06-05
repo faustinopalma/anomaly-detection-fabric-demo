@@ -68,13 +68,17 @@ through its own update-policy function attached to `anomalies`:
 | Machine | Model name | Sensors | Threshold | Data source |
 |---|---|---|---|---|
 | M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | 1.00679 | simulator physics |
-| M-002 | `transformer_ae_small__M-002` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 3.60254 | **synthgen CNC spindle** (replay of `simulator-cloud/src/synth_trace_M-002.json`) |
-| M-003 | `transformer_ae_small__M-003` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 1.88170 | **real CNC profile** (`data/cnc_profile_M-003.json`) |
+| M-002 | `transformer_ae_small__M-002` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 2.39636 | **synthgen CNC spindle** (replay of `simulator-cloud/src/synth_trace_M-002.json`) |
+| M-003 | `transformer_ae_small__M-003` | 3 (`mandrino_load` %, `mandrino_power` kW, `mandrino_torque` N*cm) | 1.93741 | **real CNC profile** (`data/cnc_profile_M-003.json`) |
 | M-004 | — (ingested, **not scored**) | 8 (synthetic) | — | simulator physics |
 
 - Each scored model is a `TransformerAE` (WINDOW=64) exported to FP16 ONNX so
   it fits the Kusto 1 MB row budget. M-002 and M-003 each have 3 input
-  features (161 419 params); M-001 has 8.
+  features; M-001 has 8. The CNC models (M-002 `denoise64d` 234 275 params,
+  M-003 `base56` 161 419 params) were trained with the SOTA lab
+  [`tools/cnc_ae_lab.py`](../tools/cnc_ae_lab.py); their thresholds are the
+  p97-floored values from that run — see
+  [`cnc_sota_training.md`](cnc_sota_training.md).
 - Scoring functions `fn_score_demo_M001/M002/M003()` live in
   [`kql/04_update_policy.kql`](../kql/04_update_policy.kql) and all attach to
   the `anomalies` update policy. Each calls

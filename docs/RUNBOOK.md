@@ -165,12 +165,15 @@ in the workspace; re-runs replace the definition in place.
 > generic offline toolbox. The live demo runs **one dedicated ONNX model
 > per machine** (M-001 synthetic + 8 sensors; **M-002** a synthgen CNC
 > spindle and **M-003** a real-data CNC machine, each with 3 sensors).
-> Those models are trained with `tools/train_per_machine.py`
-> (M-002 specifically with `tools/train_m002_synth.py`), registered with
+> Those models are trained with `tools/train_per_machine.py`; the **CNC**
+> models **M-002** and **M-003** are trained with the SOTA lab
+> [`tools/cnc_ae_lab.py`](../tools/cnc_ae_lab.py) (locally or on Azure ML via
+> `cloud-training/submit_cnc_sota.py`). All are registered with
 > `tools/05_register_model.py models/transformer_ae_small__<MID>`, and
 > scored by `fn_score_demo_M001/M002/M003()` in
 > [`kql/04_update_policy.kql`](../kql/04_update_policy.kql). See
-   [`architecture.md` §2b](architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored).
+   [`architecture.md` §2b](architecture.md#2b-current-live-deployment--per-machine-models-4-ingested-3-scored)
+   and the training report [`cnc_sota_training.md`](cnc_sota_training.md).
 
 ---
 

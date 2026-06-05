@@ -49,13 +49,18 @@ live chart — see [`webapp/README.md`](webapp/README.md).
 
 ## Documentation
 
-Read in this order, depending on what you want:
+**Start with [`docs/solution.md`](docs/solution.md)** — the single entry point
+that explains what is in production and why, with an appendix of the
+explorations that were *not* selected. Then read the deep-dives below as
+needed:
 
 | Doc | What you get |
 |---|---|
+| [`docs/solution.md`](docs/solution.md) | **Entry point**: the production solution end-to-end + appendix of non-production explorations. **Start here.** |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | **Fresh-machine recipe**: clone → working environment in ~12 sequential steps. Use this when bringing up a new PC or Remote Tunnel. |
-| [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. **Start here.** |
+| [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. |
 | [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
+| [`docs/cnc_sota_training.md`](docs/cnc_sota_training.md) | How the live M-002/M-003 models were trained, the results, and how to recreate the training (local + Azure ML). |
 | [`docs/anomaly_detection_fabric_kql.md`](docs/anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
 | [`docs/data_modeling_industrial_measures.md`](docs/data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
 | [`docs/model_architecture_options.md`](docs/model_architecture_options.md) | Model-family options (AE variants) and the tradeoffs behind the chosen TransformerAE. |
@@ -105,8 +110,10 @@ silent until it expires.
 ├── .env.example                          # template; copy to .env (gitignored)
 ├── README.md
 ├── docs/
-│   ├── concepts.md                              # plain-English tour — start here
+│   ├── solution.md                              # production entry point — start here
+│   ├── concepts.md                              # plain-English tour
 │   ├── architecture.md                          # deployed items + post-deploy steps
+│   ├── cnc_sota_training.md                     # M-002/M-003 training report + how to recreate
 │   ├── anomaly_detection_fabric_kql.md          # KQL cookbook (every option, with code)
 │   ├── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
 │   ├── model_architecture_options.md            # AE model-family options + tradeoffs

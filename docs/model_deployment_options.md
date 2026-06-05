@@ -5,19 +5,29 @@ That document is about **which model to build**; this one is about
 **how and where to run it for inference**, given the Fabric KQL
 constraints.
 
-Status as of this writing (May 2026):
+> **Status update (June 2026) — resolved.** The production demo now runs a
+> **small per-machine TransformerAE** (`transformer_ae_small`, WINDOW=64)
+> exported as a **single-file FP16 ONNX** that fits the 1 MB Kusto row, scored
+> **inline** via **Pattern C** (§2). This realises the "shrink the Transformer"
+> path of §4.1 and supersedes the table below. Conv+GRU and the large
+> Transformer remain documented as the explored alternatives. For the live
+> models and how they were trained see
+> [`cnc_sota_training.md`](cnc_sota_training.md) and
+> [`solution.md`](solution.md).
+
+Status as originally written (May 2026), kept for the analysis that led to the
+current choice:
 
 | Model | File | Raw ONNX | Base64 | IR | Single-file? | Fits 1 MB Kusto row? |
 |---|---|---|---|---|---|---|
 | Conv+GRU v2 FP32 | `models/conv_gru_ae/model.onnx` | 651 KB | 868 KB | 9 | yes | yes (tight) |
 | **Conv+GRU v2 FP16** | `models/conv_gru_ae/model.fp16.onnx` | **334 KB** | **446 KB** | **9** | **yes** | **yes (with margin)** |
-| Transformer FP32 | `models/transformer_ae/model.onnx` (+ `.data`) | 882 KB + 698 KB | n/a | 10 | **no** (external weights file) | **no** |
+| Transformer FP32 (large) | `models/transformer_ae/model.onnx` (+ `.data`) | 882 KB + 698 KB | n/a | 10 | **no** (external weights file) | **no** |
 
-The Transformer is currently **not deployable** in any of the
-KQL-friendly patterns below, because the dynamo exporter spilled its
-weights into a sidecar `.data` file. Until it is re-exported as a
-single self-contained ONNX (legacy tracer + FP16), only Conv+GRU v2 is
-production-ready.
+The **large** Transformer (`models/transformer_ae/`) was **not deployable**
+inline, because the dynamo exporter spilled its weights into a sidecar `.data`
+file. The fix was to **shrink** it to `transformer_ae_small` and re-export as a
+single self-contained FP16 ONNX (§4.1) — which is what ships today.
 
 ---
 

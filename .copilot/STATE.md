@@ -1,6 +1,22 @@
 # Current state
 
-_Last updated: 2026-06-05 (M-002/M-003 SOTA transformer-AE retrained on Azure ML; threshold floor p98→p97; deploy in progress)_
+_Last updated: 2026-06-05 (docs pass: added `docs/solution.md` production entry point + `docs/cnc_sota_training.md`; relinked README, fixed stale deployment/threshold notes)_
+
+## Docs pass (2026-06-05) — production entry point + training report
+
+- New `docs/cnc_sota_training.md`: how M-002/M-003 were trained, results, and
+  how to recreate (local `tools/cnc_ae_lab.py` + Azure ML `submit_cnc_sota.py`).
+- New `docs/solution.md`: **single entry point** narrating the production stack
+  (ingestion → per-machine TransformerAE-small → inline ONNX in-KQL → fleet →
+  control panel) with **Appendix A** of explorations NOT selected (LSTM/Conv+GRU/
+  large Transformer/external-artifact deploy/GPU T4/synthgen).
+- README doc table + layout now point to `solution.md` first and list both new
+  docs. Fixed stale notes: `model_deployment_options.md` "only Conv+GRU
+  production-ready" → resolved (TransformerAE-small FP16 inline, Pattern C);
+  `architecture.md` §2b thresholds 3.60254/1.88170 → 2.39636/1.93741 + lab/report
+  links; RUNBOOK §9 now references `cnc_ae_lab.py` (dropped stale `train_m002_synth`).
+
+_Earlier 2026-06-05: M-002/M-003 SOTA transformer-AE retrained on Azure ML; threshold floor p98→p97; deployed._
 
 ## Latest session (2026-06-05, cont.³) — M-002/M-003 SOTA sweep ported to Azure ML
 

@@ -5,7 +5,10 @@
 > scaler and threshold each — for the 3 live machines (M-001 synthetic
 > 8-sensor, M-002 + M-003 CNC 3-sensor). The options below are the design menu that
 > led to that choice; the dataset notes (`M-001..M-005`, 5 machines) describe
-> the original offline training set, not the current live fleet.
+> the original offline training set, not the current live fleet. For the
+> production picture and the explorations that were *not* selected see
+> [`solution.md`](solution.md); for how the M-002/M-003 models were actually
+> trained and how to recreate them see [`cnc_sota_training.md`](cnc_sota_training.md).
 >
 > Companion to [`.copilot/PLAN.md`](../.copilot/PLAN.md) — Phase 4.
 > Goal: pick the model we'll train on `data/training/telemetry_wide.parquet`
