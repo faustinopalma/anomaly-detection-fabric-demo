@@ -5,44 +5,56 @@
   "stride_train": 16,
   "stride_eval": 1,
   "n_features": 3,
-  "d_model": 56,
+  "d_model": 64,
   "n_heads": 4,
-  "n_enc_layers": 2,
+  "n_enc_layers": 3,
   "n_dec_layers": 2,
   "ff_dim": 160,
-  "n_parameters": 161419,
-  "threshold": 4.0,
-  "threshold_rule": "live-calibrated: normal max ~3.26 (3h), injections >=5 with scale-aware overlay",
-  "data_source": "synthgen_trace (_local/synthgen/synth_trace_full.npz)",
+  "n_parameters": 234275,
+  "threshold": 2.3963592052459717,
+  "threshold_rule": "best-F1 on held-out injected eval, floored at normal p97 (<=3% FPR)",
+  "architecture": "transformer_ae denoising=True agg=maxmean",
+  "variant": "denoise64d",
+  "data_source": "synthgen_full_trace (_local/synthgen/synth_trace_full.npz)",
   "units": {
     "mandrino_load": "%",
     "mandrino_power": "kW",
     "mandrino_torque": "N*cm"
   },
   "training": {
-    "epochs": 24,
+    "epochs": 18,
     "batch": 256,
     "lr": 0.0003,
     "weight_decay": 1e-05,
-    "best_val_loss": 0.9163204576298503,
-    "device": "cpu",
-    "duty_cycle": 0.9958101851851852
+    "denoise": true,
+    "noise_sigma": 0.15,
+    "mask_frac": 0.12,
+    "device": "cpu"
+  },
+  "eval": {
+    "pr_auc": 0.9331382922214422,
+    "best_f1": 0.8466181061394381,
+    "n_pos": 5141,
+    "n_neg": 7583,
+    "precision_at_thr": 0.9427423405323958,
+    "recall_at_thr": 0.7302081307138689,
+    "f1_at_thr": 0.8229748986079141
   },
   "onnx": {
     "ir_version": 9,
     "fp32": {
       "path": "model.onnx",
-      "raw_kb": 806.1,
-      "base64_kb": 1074.8,
+      "raw_kb": 1117.8,
+      "base64_kb": 1490.4,
       "kusto_row_fits": false
     },
     "fp16": {
       "path": "model.fp16.onnx",
-      "raw_kb": 491.9,
-      "base64_kb": 655.8,
+      "raw_kb": 661.4,
+      "base64_kb": 881.9,
       "kusto_row_fits": true
     },
-    "parity_fp16_max_rel_diff": 3.236612246837467e-05
+    "parity_fp16_max_rel_diff": 6.399397534551099e-05
   },
   "scaler": {
     "sensors": [
@@ -51,14 +63,14 @@
       "mandrino_torque"
     ],
     "mean": [
-      8.779221534729004,
-      7.876816272735596,
-      2682.2294921875
+      8.770194053649902,
+      7.87619686126709,
+      2683.430419921875
     ],
     "std": [
-      6.02059268951416,
-      4.558867454528809,
-      1707.84619140625
+      5.983078956604004,
+      4.535666465759277,
+      1698.6441650390625
     ]
   },
   "kusto_deployable": true

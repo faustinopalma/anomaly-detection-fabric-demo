@@ -1,6 +1,58 @@
 # Plan
 
-_Last updated: 2026-06-05 (false positives FIXED via activity gate + M-001 threshold; GPU M-002 retrain pending user decision)_
+_Last updated: 2026-06-05 (SOTA CNC AE for M-002/M-003 trained on Azure ML; p97 threshold; deploy in progress)_
+
+## DONE — SOTA transformer AE for M-002 + M-003, trained on Azure ML
+
+Training was ported to Azure ML (user request). Lab code `tools/cnc_ae_lab.py`
+is the single source of truth; the cloud driver `cloud-training/submit_cnc_sota.py`
+just stages + submits + streams + downloads. Final job `mango_muscle_vr3zgcqqzq`
+(cpu-cluster) completed:
+- M-003 `base56` (161k) thr 1.9374 → P0.954 R0.869 F1 0.910 PR-AUC 0.953.
+- M-002 `denoise64d` (234k) thr 2.3964 (p97 floor) → P0.943 R0.730 F1 0.823, FPR 3.0%.
+
+Threshold floor relaxed p98→p97 (3% FPR knee) after quantifying M-002's full
+precision/recall/FPR curve (best-F1 0.847 @2.16 costs 5.3% FPR — too noisy).
+Deploy: register both live (429-throttle: space retries), then verify + commit.
+
+## ORIGINAL APPROACH (delivered)
+
+User goal (Italian): build a NEW transformer model for M-002 and M-003, sized
+right to be callable from KQL in Fabric (not smaller, not too big); start by
+generating the dataset with the simulator code; structure the model optimally;
+try several variants to find the best; finish training and deploy to the
+existing DEV environment (disruptions OK). State-of-the-art techniques, not
+illustrative models — must reach SOTA precision/recall.
+
+Key facts established this session:
+- KQL is fully generic: `fn_score_demo_M002/3` read window/sensors/scaler AND
+  `metadata.threshold` from the latest model row and run the baked-in ONNX
+  score. Deploying a new model = pure `tools/05_register_model.py` re-register
+  (version bump). NO KQL or simulator redeploy needed. Activity gate
+  (`activity >= 0.5`) stays in KQL and already blocks idle/OOD windows.
+- Data sources = the simulator code (train/serve consistency):
+  M-003 → `simulator-local/cnc_engine.generate_frame(data/cnc_profile_M-003.json)`;
+  M-002 → served replay trace `simulator-cloud/src/synth_trace_M-002.json`.
+- Size budget: single-file FP16 ONNX, base64 ≤ 1 MB Kusto row. Current "small"
+  is 161k params / 656 KB b64. Right-sized target ≈ 200–240k params (b64 < 1 MB
+  with margin). Export gated by measured fp16 fit.
+- Model name KEY stays `transformer_ae_small__M-00X` (opaque key used by KQL);
+  metadata records the true new architecture/size.
+
+Approach (tools/cnc_ae_lab.py):
+1. Build a LABELED eval set: hold out unseen normal data, inject scale-aware
+   spike/drift/stuck (mirroring the live `AnomalyOverlay`) with window-level
+   ground truth → real precision/recall/F1/PR-AUC (non-illustrative).
+2. Sweep right-sized Transformer-AE variants: plain reconstruction vs
+   denoising/masked (Gaussian noise + temporal masking → robustness/precision),
+   2 capacities, 2 score aggregations (max-over-sensor vs mean). Gate by fp16
+   fit; select by F1 (tie-break PR-AUC).
+3. Retrain winner on full normal data; calibrate best-F1 threshold on a fresh
+   injected eval; export Kusto-safe FP16 ONNX (parity + size checked).
+4. Register both models live (version bump) + verify offline metrics and live
+   `_verify_fix`. Commit + update STATE/memory.
+
+_Earlier plan below._
 
 ## DONE — Eliminate false positives via activity gate (DEPLOYED to live KQL)
 

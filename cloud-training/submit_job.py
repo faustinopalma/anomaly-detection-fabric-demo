@@ -68,19 +68,24 @@ def download_models(ml: MLClient, job_name: str) -> None:
     """
     from azure.storage.blob import BlobServiceClient
 
-    store = ml.datastores.get_default()
-    account = store.account_name
-    container = store.container_name
+    # A command job's default uri_folder output lives in the
+    # ``workspaceartifactstore`` datastore (container ``azureml``), NOT the
+    # default ``workspaceblobstore``. Try the artifact store first.
     cred = AzureCliCredential()
-    bsc = BlobServiceClient(
-        f"https://{account}.blob.core.windows.net", credential=cred)
-    cont = bsc.get_container_client(container)
 
-    prefix = f"azureml/{job_name}/"  # default output uri_folder location
+    def _client(ds_name: str):
+        store = ml.datastores.get(ds_name)
+        bsc = BlobServiceClient(
+            f"https://{store.account_name}.blob.core.windows.net", credential=cred)
+        return bsc.get_container_client(store.container_name)
+
+    cont = _client("workspaceartifactstore")
+    prefix = f"ExperimentRun/dcid.{job_name}/outputs/"
     blobs = [b.name for b in cont.list_blobs(name_starts_with=prefix)]
     if not blobs:
-        # fall back to ExperimentRun artifact path
-        prefix = f"ExperimentRun/dcid.{job_name}/outputs/"
+        # fall back to the default blob store / legacy layout
+        cont = _client("workspaceblobstore")
+        prefix = f"azureml/{job_name}/"
         blobs = [b.name for b in cont.list_blobs(name_starts_with=prefix)]
 
     copied: set[str] = set()

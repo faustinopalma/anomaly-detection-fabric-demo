@@ -1,6 +1,47 @@
 # Current state
 
-_Last updated: 2026-06-05 (transformer-ridotto retrain M-001+M-004 evaluated & NOT deployed — empirical regression; export bug fixed in cloud trainer; verified models kept live)_
+_Last updated: 2026-06-05 (M-002/M-003 SOTA transformer-AE retrained on Azure ML; threshold floor p98→p97; deploy in progress)_
+
+## Latest session (2026-06-05, cont.³) — M-002/M-003 SOTA sweep ported to Azure ML
+
+User (Italian): "vorrei che il training sia in azure" + use GPU if faster +
+auto-diagnose/fix/retry interruptions + show streamed logs. (Work autonomously.)
+
+**What shipped:**
+- New cloud driver `cloud-training/submit_cnc_sota.py` (+ `src_cnc_sota/entry_cnc_sota.py`):
+  stages lab + data to `%TEMP%`, submits an AML command job that runs
+  `tools/cnc_ae_lab.py` per machine, publishes `models/transformer_ae_small__*`
+  artifacts. Same single-source-of-truth lab code; no Fabric notebook dependency.
+- AML workspace `anomalyml-mlw` (rg `rg-anomaly-ml-westeurope`). Compute:
+  `cpu-cluster` (DS3_v2) is the reliable choice; `gpu-t4-cluster` (NC4as_T4_v3)
+  exists but **T4 capacity in westeurope is unreliable** (a GPU job queued >9 min
+  and was cancelled → CPU fallback). CPU sweep ≈150-175s/variant @18 epochs.
+
+**Final job `mango_muscle_vr3zgcqqzq` (COMPLETED rc=0):**
+- **M-003** winner `base56` (161,419 params) thr **1.9374**: precision **0.954**,
+  recall **0.869**, F1 **0.910**, PR-AUC 0.953. Excellent.
+- **M-002** winner `denoise64d` (234,275 params): best-F1 0.847 @2.160. Deployed
+  thr **2.3964** (p97 floor): precision **0.943**, recall **0.730**, F1 **0.823**,
+  FPR 3.0%.
+
+**Threshold floor p98→p97 (this session's key decision):** the unconstrained
+best-F1 point for M-002 sits at ~5.3% per-window FPR (too many false alarms);
+the earlier p98 (2% FPR) floor over-corrected (recall 0.683). Quantified the full
+precision/recall/FPR curve from the downloaded model (no retrain — threshold is
+NOT baked into the ONNX, the KQL scorer reads `metadata.threshold` at runtime) and
+picked the **p97 (≤3% FPR) knee**: recall 0.730, precision 0.943. `cnc_ae_lab.py`
+`run()` updated to p97; M-002 metadata patched in place; M-003 unaffected
+(best_thr 1.937 > p97 floor). Analysis scripts under `_local/`.
+
+**Infra notes:** AML default command-job output lives in datastore
+`workspaceartifactstore` (container `azureml`, path `ExperimentRun/dcid.{job}/outputs/`),
+NOT `workspaceblobstore` — `submit_job.download_models()` patched accordingly.
+Storage `stanomalymlfknlnf4v` publicNetworkAccess was toggled Enabled for code
+upload and **restored to Disabled** at task end.
+
+**Deploy:** registering M-003 then M-002 into the live Eventhouse — heavy 657 KB
+`.set-or-append` mgmt commands trip **429 KustoThrottling**; must space retries.
+M-001/M-004 untouched.
 
 ## Latest session (2026-06-05, cont.²) — retrain transformer ridotto M-001+M-004: VALUTATO, NON deployato
 

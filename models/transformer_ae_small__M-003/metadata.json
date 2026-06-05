@@ -11,8 +11,10 @@
   "n_dec_layers": 2,
   "ff_dim": 160,
   "n_parameters": 161419,
-  "threshold": 1.8816989660263062,
-  "threshold_rule": "p99.5 on training-val window scores",
+  "threshold": 1.9374133348464966,
+  "threshold_rule": "best-F1 on held-out injected eval, floored at normal p97 (<=3% FPR)",
+  "architecture": "transformer_ae denoising=False agg=maxmean",
+  "variant": "base56",
   "data_source": "real_cnc_profile (data/cnc_profile_M-003.json)",
   "units": {
     "mandrino_load": "%",
@@ -20,12 +22,23 @@
     "mandrino_torque": "N*cm"
   },
   "training": {
-    "epochs": 16,
+    "epochs": 18,
     "batch": 256,
     "lr": 0.0003,
     "weight_decay": 1e-05,
-    "best_val_loss": 1.0329431779355283,
+    "denoise": false,
+    "noise_sigma": 0.15,
+    "mask_frac": 0.12,
     "device": "cpu"
+  },
+  "eval": {
+    "pr_auc": 0.9526662561807671,
+    "best_f1": 0.9097943392384443,
+    "n_pos": 5141,
+    "n_neg": 83475,
+    "precision_at_thr": 0.9544871794871795,
+    "recall_at_thr": 0.8688971017311807,
+    "f1_at_thr": 0.9096833316362897
   },
   "onnx": {
     "ir_version": 9,
@@ -41,7 +54,7 @@
       "base64_kb": 655.8,
       "kusto_row_fits": true
     },
-    "parity_fp16_max_rel_diff": 3.376076710992493e-05
+    "parity_fp16_max_rel_diff": 3.20934850606136e-05
   },
   "scaler": {
     "sensors": [
@@ -50,14 +63,14 @@
       "mandrino_torque"
     ],
     "mean": [
-      9.071867942810059,
-      6.596578598022461,
-      2429.75537109375
+      9.094085693359375,
+      6.592127799987793,
+      2418.476318359375
     ],
     "std": [
-      14.530637741088867,
-      11.534087181091309,
-      4317.54443359375
+      14.4336576461792,
+      11.573533058166504,
+      4307.2841796875
     ]
   },
   "kusto_deployable": true
