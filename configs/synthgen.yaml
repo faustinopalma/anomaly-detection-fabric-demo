@@ -40,7 +40,7 @@ defaults:
     gpu_cluster: gpu-t4-cluster
     gpu_sku: Standard_NC4as_T4_v3
     experiment_name: synthgen-diffusion
-    environment_image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04:latest
+    environment_image: mcr.microsoft.com/azureml/openmpi4.1.0-cuda11.8-cudnn8-ubuntu22.04:latest
 
 # Fast local methodology loop.
 local:

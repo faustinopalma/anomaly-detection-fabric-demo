@@ -89,7 +89,7 @@ class AmlConfig:
     gpu_sku: str = "Standard_NC4as_T4_v3"  # 1x T4, within NCASv3_T4=16 quota
     experiment_name: str = "synthgen-diffusion"
     environment_image: str = (
-        "mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04:latest"
+        "mcr.microsoft.com/azureml/openmpi4.1.0-cuda11.8-cudnn8-ubuntu22.04:latest"
     )
 
 
