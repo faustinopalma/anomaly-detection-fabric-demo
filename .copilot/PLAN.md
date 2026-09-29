@@ -1,6 +1,15 @@
 # Plan
 
-_Last updated: 2026-06-05 (SOTA CNC AE for M-002/M-003 trained on Azure ML; p97 threshold; deploy in progress)_
+Last updated: 2026-09-29 (README objective clarification; documentation-only update).
+
+## README objective clarification (2026-09-29)
+
+- [x] Rewrite the README opening as an executive summary: complement Fabric's native anomaly detection with custom models for more complex industrial scenarios.
+- [x] Explain sensor relationships, temporal patterns, operating context, and demo validation limits without duplicating implementation details.
+- [x] Validate the documentation changes and update the session handoff: README diagnostics clean, 14 unique local link targets checked, and whitespace checks passed.
+- [x] Restrict the authorized commit/push scope to README and session handoff files; leave existing notebook, data, and tool changes untouched. No live-environment changes.
+
+Publication is authorized on `main`; use Git history and upstream tracking for delivery status. Earlier plans and outcomes are retained below.
 
 ## DONE — SOTA transformer AE for M-002 + M-003, trained on Azure ML
 

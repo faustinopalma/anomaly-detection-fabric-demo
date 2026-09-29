@@ -1,6 +1,16 @@
 # Current state
 
-_Last updated: 2026-06-05 (docs pass: added `docs/solution.md` production entry point + `docs/cnc_sota_training.md`; relinked README, fixed stale deployment/threshold notes)_
+Last updated: 2026-09-29 (README objective clarification; documentation only).
+
+## README objective clarification (2026-09-29)
+
+- Rewrote the README opening as an executive summary: complement native Fabric anomaly detection with custom models for sensor relationships, temporal patterns, and machine-specific operating context.
+- Distinguished the implemented custom-model path from native KQL detection, offline training from in-Fabric inference, and controlled demo results from real-fault validation. Reduced repeated architecture and documentation prose.
+- Verification: native KQL description checked against Microsoft Learn; README editor diagnostics clean; all 14 unique local README link targets exist; documentation whitespace checks passed.
+- No application or live-environment changes. Existing notebook, data, and tool changes are outside this task and must remain uncommitted.
+- User authorized commit and push of README and the required session handoff files on `main`; Git history and upstream tracking record publication status.
+
+Earlier implementation history follows; this documentation update did not recheck the live deployment.
 
 ## Docs pass (2026-06-05) — production entry point + training report
 

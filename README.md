@@ -1,62 +1,45 @@
 # anomaly-detection-fabric-demo
 
-Bootstrap a Microsoft Fabric workspace for a **factory anomaly-detection
-demo** using the **Fabric CLI** (`fab`) driven from PowerShell with
-**device-code authentication**.
+## Executive summary
 
-The demo ingests time-series telemetry from multiple machines (each with
-multiple sensors), trains a window-based model offline, exports it to
-**ONNX**, and scores it **inside the Fabric KQL database** via the
-`python()` plugin — no external Spark/AKS cluster required. Detections and
-live telemetry are surfaced on a Fabric **Real-Time Dashboard**
-(`rtd_telemetry_live`).
+**The goal is to complement Microsoft Fabric's native anomaly detection with custom models for more complex industrial monitoring scenarios.** Some anomalies depend on the relationship between several sensors, how their signals evolve over time, and whether a machine is idle or producing. For example, spindle power and torque may each remain within their usual ranges while their combination is unusual for the workload.
 
-## Current live architecture (4 machines ingested, 3 scored)
+This demo implements a machine-specific detection pipeline within Fabric, from incoming telemetry to a dashboard showing detected anomalies. Models learn normal behaviour from examples and flag deviations for investigation. Training runs locally or on Azure Machine Learning; detection runs inside Fabric, without a separate model-serving cluster. The intended benefit is to extend the scenarios covered while keeping data ingestion, detection, and monitoring on the same platform.
 
-The demo has converged on a **production-realistic, per-machine** shape:
-one dedicated ONNX model per machine, each with its own scaler and
-threshold (read from the model's `metadata.threshold`) — no single
-hard-coded `machine=` filter in the scoring path.
+## How this complements native detection
 
-The always-on cloud simulator **ingests four machines**; **three of them are
-scored** by a dedicated in-KQL model. M-004 is ingested as an extra physics
-machine but its model is not registered for scoring (see note below).
+Fabric's native KQL functions, such as [`series_decompose_anomalies()`](https://learn.microsoft.com/en-us/kusto/query/series-decompose-anomalies-function?view=microsoft-fabric), detect deviations in individual time series after accounting for trend and seasonality. They provide a starting point without a custom model to train or maintain. This repository explores a complementary approach when the application needs:
+
+- **Relationships between sensors:** assess measurements such as load, power, and torque together, including unusual combinations of otherwise plausible values.
+- **Patterns over time:** analyse a sequence of measurements to capture changes in behaviour that a single reading may not reveal.
+- **Machine-specific operating context:** use a dedicated model and detection threshold for each machine, with an activity filter to exclude idle periods outside the model's training conditions.
+
+The implemented demo focuses on the custom-model path. It includes controlled anomaly injection and checks for detections, missed events, and false alarms. These tests demonstrate the integration and its behaviour on the evaluated data; they do not establish superiority over native detection or validated diagnosis of real equipment faults. Short spikes and frozen sensor values can still be missed, and unfamiliar operating conditions can produce false alarms.
+
+## Demo architecture
+
+The detector is a **Transformer autoencoder**, a model trained to reconstruct normal sequences of sensor readings. A high reconstruction error indicates a possible anomaly. Each machine has its own model, input scaling, and threshold. Models are exported to **ONNX**, a portable model format, and executed in the Fabric KQL database through the `python()` plugin. Thresholds are read from `metadata.threshold` and can be adjusted without retraining.
 
 | Machine | Model (scoring) | Sensors | Data source |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | simulator physics |
 | M-002 | `transformer_ae_small__M-002` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | synthgen replay trace |
 | M-003 | `transformer_ae_small__M-003` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | recorded real CNC profile |
 | M-004 | — (ingested, not scored) | 8 (synthetic) | simulator physics |
 
-Live pipeline: **always-on cloud simulator** (Azure Container App,
-`SIM_MACHINES=4`, `SIM_CNC_MACHINE=M-003`, `SIM_SYNTH_MACHINE=M-002`) →
-Eventstream `es_machines` →
-KQL `raw_telemetry` → per-machine update-policy functions
-`fn_score_demo_M001/M002/M003` → `anomalies` → Real-Time Dashboard
-`rtd_telemetry_live`.
+Pipeline: **cloud simulator** (Azure Container Apps) → **Eventstream** → **Eventhouse** (`raw_telemetry` → per-machine model scoring → `anomalies`) → **Real-Time Dashboard**. Scoring runs on ingested batches through update policies, so detection is near real time rather than instantaneous.
 
-The same Container App also serves an **Entra ID–gated control panel**
-(same-origin FastAPI + static `webapp/`) to watch live state, force a
-machine's state, toggle/inject anomalies, and view a client-side 5-minute
-live chart — see [`webapp/README.md`](webapp/README.md).
+The simulator also serves a **control panel protected by Microsoft Entra ID** to view live telemetry, change machine states, inject anomalies, and compare those injections with detections returned by Fabric. See [webapp/README.md](webapp/README.md).
 
-> `models/transformer_ae_small__M-004/` is a trained **benchmark** model
-> (cloud-vs-local comparison). It is ingested by the simulator as a 4th
-> physics machine but **not** registered in the KQL `models` table, so it
-> produces telemetry without detections. Wiring it for scoring is a separate
-> step (`tools/05_register_model.py` + a `fn_score_demo_M004()` policy entry).
+The table describes the documented demo configuration. The M-004 model is a cloud-versus-local training benchmark; enabling its scoring requires model registration and an update-policy entry. Deployment details are in [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
-**Start with [`docs/solution.md`](docs/solution.md)** — the single entry point
-that explains what is in production and why, with an appendix of the
-explorations that were *not* selected. Then read the deep-dives below as
-needed:
+For implementation details, follow the guides below.
 
 | Doc | What you get |
-|---|---|
-| [`docs/solution.md`](docs/solution.md) | **Entry point**: the production solution end-to-end + appendix of non-production explorations. **Start here.** |
+| --- | --- |
+| [`docs/solution.md`](docs/solution.md) | End-to-end implementation and rationale, including alternatives evaluated. |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | **Fresh-machine recipe**: clone → working environment in ~12 sequential steps. Use this when bringing up a new PC or Remote Tunnel. |
 | [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. |
 | [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
@@ -105,7 +88,7 @@ silent until it expires.
 
 ## Layout
 
-```
+```text
 .
 ├── .env.example                          # template; copy to .env (gitignored)
 ├── README.md
