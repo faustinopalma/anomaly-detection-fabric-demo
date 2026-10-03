@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Una guida passo passo al repository anomaly-detection-fabric-demo: telemetria industriale, Transformer autoencoder, ONNX e scoring nel database KQL di Microsoft Fabric.">
+  <meta name="color-scheme" content="light dark">
+  <title>Anomaly Detection su Microsoft Fabric | Guida al repository</title>
+  <script>
+    (() => {
+      const param = new URLSearchParams(window.location.search).get("scoutTheme");
+      const theme =
+        param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", theme);
+    })();
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --cp-bg: #f7f4ef;
+      --cp-bg-elevated: #fcfbf8;
+      --cp-surface: #ffffff;
+      --cp-surface-soft: #f5f5f5;
+      --cp-border: #dedede;
+      --cp-border-strong: #919191;
+      --cp-text: #242424;
+      --cp-text-muted: #5c5c5c;
+      --cp-text-soft: #6f6f6f;
+      --cp-accent: #b11f4b;
+      --cp-accent-hover: #9a1a41;
+      --cp-accent-soft: rgba(177, 31, 75, 0.08);
+      --cp-accent-fg: #ffffff;
+      --cp-success: #16a34a;
+      --cp-danger: #dc2626;
+      --cp-warning: #f59e0b;
+      --cp-link: #0078d4;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      --cp-overlay: rgba(255, 255, 255, 0.8);
+      --cp-panel: rgba(255, 255, 255, 0.86);
+      --cp-panel-strong: rgba(255, 255, 255, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.55);
+      --cp-highlight: rgba(177, 31, 75, 0.12);
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --cp-bg: #3d3b3a;
+      --cp-bg-elevated: #343231;
+      --cp-surface: #292929;
+      --cp-surface-soft: #2e2e2e;
+      --cp-border: #474747;
+      --cp-border-strong: #5f5f5f;
+      --cp-text: #dedede;
+      --cp-text-muted: #919191;
+      --cp-text-soft: #b0b0b0;
+      --cp-accent: #fd8ea1;
+      --cp-accent-hover: #fb7b91;
+      --cp-accent-soft: rgba(253, 142, 161, 0.14);
+      --cp-accent-fg: #1a1a1a;
+      --cp-success: #4ade80;
+      --cp-danger: #f87171;
+      --cp-warning: #fbbf24;
+      --cp-link: #4da6ff;
+      --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --cp-overlay: rgba(41, 41, 41, 0.88);
+      --cp-panel: rgba(41, 41, 41, 0.72);
+      --cp-panel-strong: rgba(41, 41, 41, 0.96);
+      --cp-sheen: rgba(255, 255, 255, 0.04);
+      --cp-highlight: rgba(253, 142, 161, 0.12);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 6rem; }
+    body { margin: 0; background: var(--cp-surface); color: var(--cp-text); font: 17px/1.7 "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: 0; }
+    a { color: var(--cp-link); text-underline-offset: .2em; overflow-wrap: anywhere; }
+    a:hover { text-decoration-thickness: 2px; }
+    :focus-visible { outline: 3px solid var(--cp-link); outline-offset: 4px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    code, pre, .mono { font-family: Consolas, "Courier New", Courier, monospace; }
+    code { font-size: .88em; overflow-wrap: anywhere; }
+    p code, li code, td code { background: var(--cp-surface-soft); padding: .1em .25em; border-radius: 3px; }
+    p { margin: 0 0 1.2rem; }
+    strong { font-weight: 650; }
+    h1, h2, h3 { line-height: 1.2; font-weight: 650; text-wrap: balance; letter-spacing: 0; }
+    h1 { font-size: 48px; margin: .65rem 0 1.5rem; max-width: 20ch; }
+    h2 { font-size: 30px; margin: .4rem 0 1.5rem; }
+    h3 { font-size: 21px; margin: 2rem 0 .85rem; }
+    .skip { position: fixed; top: -5rem; left: 1rem; z-index: 10; padding: .65rem 1rem; background: var(--cp-surface); }
+    .skip:focus { top: .5rem; }
+    .topbar { position: sticky; top: 0; z-index: 5; border-bottom: 1px solid var(--cp-border); background: var(--cp-panel-strong); }
+    .topbar-inner { max-width: 1320px; margin: auto; min-height: 68px; padding: .7rem 2rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .brand { color: var(--cp-text); text-decoration: none; font-size: 15px; font-weight: 650; }
+    .brand span { color: var(--cp-accent); }
+    .top-actions { display: flex; gap: 1.1rem; align-items: center; font-size: 14px; }
+    .theme-control { display: flex; align-items: center; gap: .5rem; white-space: nowrap; }
+    input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--cp-accent); }
+    .layout { display: grid; grid-template-columns: 228px minmax(0, 860px); gap: 64px; max-width: 1280px; margin: auto; padding: 0 32px; }
+    .sidebar { position: sticky; top: 100px; align-self: start; max-height: calc(100vh - 120px); overflow-y: auto; padding: 1rem 0; }
+    .nav-label, .eyebrow, .section-number { font: 12px/1.5 Consolas, "Courier New", Courier, monospace; text-transform: uppercase; color: var(--cp-accent); }
+    .nav-label { color: var(--cp-text-soft); margin-bottom: 1rem; }
+    .sidebar ol { list-style: none; padding: 0; margin: 0; }
+    .sidebar a { display: flex; gap: .7rem; align-items: baseline; padding: .5rem .6rem; border-left: 2px solid var(--cp-border); text-decoration: none; color: var(--cp-text-muted); font-size: 14px; line-height: 1.45; }
+    .sidebar a span { flex: 0 0 2ch; white-space: nowrap; font: 12px Consolas, monospace; color: var(--cp-text-soft); }
+    .sidebar a[aria-current="location"] { color: var(--cp-accent); border-color: var(--cp-accent); background: var(--cp-accent-soft); }
+    .sidebar a:hover { color: var(--cp-text); background: var(--cp-surface-soft); }
+    .sidebar .source-link { border: 0; margin-top: 1.5rem; }
+    main { min-width: 0; padding-bottom: 3rem; }
+    .intro { padding: 64px 0 40px; border-bottom: 1px solid var(--cp-border); background: linear-gradient(130deg, var(--cp-surface), var(--cp-surface-soft)); }
+    .intro .lead { font-size: 21px; line-height: 1.55; max-width: 62ch; }
+    .scope { color: var(--cp-text-muted); font-size: 14px; margin: 1.4rem 0 0; max-width: 75ch; }
+    section { padding: 48px 0; border-bottom: 1px solid var(--cp-border); scroll-margin-top: 1rem; }
+    .pipeline { list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 0; margin: 2rem 0; border-top: 2px solid var(--cp-accent); border-bottom: 1px solid var(--cp-border); }
+    .pipeline li { padding: 1rem .65rem 1rem 0; font-size: 13px; line-height: 1.5; min-width: 0; }
+    .pipeline li + li { padding-left: .65rem; border-left: 1px solid var(--cp-border); }
+    .pipeline b { display: block; font-size: 14px; color: var(--cp-text); margin-bottom: .3rem; }
+    .pipeline span { color: var(--cp-text-muted); }
+    .note { border-left: 3px solid var(--cp-accent); padding: .85rem 1.2rem; background: var(--cp-accent-soft); margin: 1.7rem 0; font-size: 15px; }
+    .note p:last-child { margin-bottom: 0; }
+    .table-wrap { max-width: 100%; overflow-x: auto; margin: 1.4rem 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.6; text-align: left; }
+    caption { text-align: left; color: var(--cp-text-muted); font-size: 13px; padding: 0 0 .65rem; }
+    th { font-weight: 650; background: var(--cp-surface-soft); }
+    th, td { padding: .8rem .7rem; border-bottom: 1px solid var(--cp-border); vertical-align: top; }
+    th:first-child, td:first-child { padding-left: .5rem; }
+    .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .source { font-size: 13px; color: var(--cp-text-muted); margin: 1.5rem 0 0; }
+    .source a { display: inline; }
+    pre { background: var(--cp-surface-soft); border: 1px solid var(--cp-border); padding: 1.2rem; overflow-x: auto; font-size: 14px; line-height: 1.65; border-radius: 6px; }
+    pre code { font-size: inherit; overflow-wrap: normal; }
+    .sequence { padding-left: 1.6rem; }
+    .sequence li { padding-left: .35rem; margin-bottom: 1rem; }
+    .sequence li::marker { color: var(--cp-accent); font-weight: 650; }
+    .formula { border-block: 1px solid var(--cp-border); padding: 1.2rem .4rem; font-family: Consolas, monospace; font-size: 15px; line-height: 1.9; overflow-wrap: anywhere; }
+    .experiment { border: 1px solid var(--cp-border-strong); border-radius: 8px; padding: 1.4rem; margin: 1.5rem 0; background: var(--cp-surface); }
+    .experiment h3 { margin: 0 0 .7rem; }
+    .experiment .definition { font-size: 14px; color: var(--cp-text-muted); }
+    figure { margin: 1rem 0; }
+    .plot { height: 230px; width: 100%; display: block; }
+    figcaption { font-size: 13px; color: var(--cp-text-muted); padding-top: .5rem; }
+    .visual-figure { margin: 2rem 0; padding: 1.4rem 0; border-block: 1px solid var(--cp-border); }
+    .visual-title { display: block; font-size: 15px; font-weight: 650; margin-bottom: 1rem; color: var(--cp-text); }
+    .lane-label { font: 12px/1.5 Consolas, monospace; color: var(--cp-text-soft); margin: 0 0 .8rem; }
+    .flow-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; list-style: none; padding: 0; margin: 0; }
+    .flow-row.wide { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .flow-node { position: relative; min-width: 0; min-height: 100px; padding: 1rem .7rem; border: 1px solid var(--cp-border-strong); border-top: 3px solid var(--cp-link); background: var(--cp-surface); border-radius: 4px; text-align: center; line-height: 1.5; }
+    .flow-node strong { display: block; font-size: 14px; overflow-wrap: anywhere; }
+    .flow-node small { display: block; color: var(--cp-text-muted); font-size: 12px; margin-top: .35rem; }
+    .flow-node.accent { border-top-color: var(--cp-accent); background: var(--cp-accent-soft); }
+    .flow-node.success { border-top-color: var(--cp-success); }
+    .flow-node + .flow-node::before { content: "\2192"; position: absolute; left: -29px; top: calc(50% - 16px); width: 28px; color: var(--cp-text-soft); font: 24px/32px "Segoe UI", sans-serif; }
+    .model-transfer { position: relative; height: 70px; margin: .3rem 0; font-size: 12px; color: var(--cp-accent); }
+    .model-transfer svg { position: absolute; inset: 0; width: 100%; height: 70px; }
+    .model-transfer path { fill: none; stroke: var(--cp-accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    .model-transfer span { position: absolute; right: 32%; top: 20px; }
+    .window-figure { display: grid; grid-template-columns: minmax(0, .85fr) 28px minmax(0, 1.3fr); align-items: center; gap: 16px; }
+    .window-figure > div { min-width: 0; }
+    .diagram-label { font-size: 13px; font-weight: 650; margin-bottom: .75rem; }
+    .event-list { display: grid; gap: .5rem; }
+    .event-row { display: grid; grid-template-columns: 44px 1fr auto; gap: .6rem; align-items: center; padding: .55rem .65rem; border-left: 3px solid var(--cp-link); background: var(--cp-surface-soft); font-size: 13px; }
+    .event-row.power { border-color: var(--cp-accent); }
+    .event-row.torque { border-color: var(--cp-success); }
+    .event-row b { font-family: Consolas, monospace; font-weight: 400; }
+    .event-row span:first-child { color: var(--cp-text-muted); }
+    .diagram-arrow { text-align: center; color: var(--cp-text-soft); font-size: 28px; }
+    .sample-matrix { display: grid; grid-template-columns: 44px repeat(3, minmax(0, 1fr)); gap: 3px; text-align: center; font: 12px/1.5 Consolas, monospace; }
+    .sample-matrix > span { display: flex; align-items: center; justify-content: center; min-height: 33px; padding: .35rem .15rem; background: var(--cp-surface-soft); }
+    .sample-matrix .matrix-label { background: var(--cp-surface); color: var(--cp-text-muted); font: 11px/1.5 "Segoe UI", sans-serif; }
+    .sample-matrix .load-cell { border-bottom: 2px solid var(--cp-link); }
+    .sample-matrix .power-cell { border-bottom: 2px solid var(--cp-accent); }
+    .sample-matrix .torque-cell { border-bottom: 2px solid var(--cp-success); }
+    .window-shape { margin-top: 1rem; border-left: 3px solid var(--cp-accent); padding: .3rem .75rem; color: var(--cp-text-muted); font-size: 12px; }
+    .window-shape strong { color: var(--cp-text); font-size: 17px; }
+    .signal-sketch { width: 100%; max-width: 200px; height: 110px; display: block; margin: .7rem auto; }
+    .signal-sketch path { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .signal-sketch .load-line { stroke: var(--cp-link); }
+    .signal-sketch .power-line { stroke: var(--cp-accent); }
+    .signal-sketch .torque-line { stroke: var(--cp-success); }
+    .signal-sketch .axis { stroke: var(--cp-border); stroke-width: 1; }
+    .model-core { display: grid; align-content: center; min-height: 132px; gap: .35rem; font-size: 14px; }
+    .model-core span { display: block; }
+    .model-core .connection { color: var(--cp-accent); line-height: 1; }
+    .error-reduction { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) 28px minmax(0, 1fr); gap: .7rem; align-items: center; margin: 1.2rem 0 .5rem; font-size: 12px; text-align: center; }
+    .error-reduction > div { border-top: 2px solid var(--cp-border); padding-top: .65rem; }
+    .error-reduction .selected { border-color: var(--cp-accent); color: var(--cp-accent); }
+    .error-reduction b { display: block; font: 21px/1.5 Consolas, monospace; }
+    .visual-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin: .7rem 0 1rem; font-size: 12px; color: var(--cp-text-muted); }
+    .visual-legend span { display: flex; align-items: center; gap: .4rem; }
+    .visual-legend i { width: 16px; border-top: 3px solid var(--cp-link); }
+    .visual-legend .power-key { border-color: var(--cp-accent); }
+    .visual-legend .torque-key { border-color: var(--cp-success); }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem 1.6rem; border-top: 1px solid var(--cp-border); padding-top: 1.3rem; }
+    .control label { display: flex; justify-content: space-between; gap: .5rem; font-size: 14px; }
+    output { font-variant-numeric: tabular-nums; font-weight: 650; }
+    input[type="range"] { width: 100%; margin: .7rem 0 0; accent-color: var(--cp-accent); }
+    input[type="number"] { width: 100%; max-width: 9rem; padding: .35rem .6rem; margin-top: .4rem; color: var(--cp-text); background: var(--cp-surface-soft); border: 1px solid var(--cp-border-strong); border-radius: 4px; }
+    .activity-control { display: flex; align-items: center; gap: .65rem; font-size: 14px; }
+    .result { display: flex; gap: 1.5rem; align-items: center; margin-top: 1.4rem; padding: 1rem; background: var(--cp-surface-soft); border-left: 3px solid var(--cp-border-strong); min-height: 100px; }
+    .result[data-state="anomaly"] { border-color: var(--cp-accent); }
+    .score-value { font: 28px/1.3 Consolas, monospace; min-width: 5.5ch; }
+    .score-label { font-size: 12px; color: var(--cp-text-muted); }
+    .decision { font-size: 15px; }
+    .decision p { font-size: 13px; line-height: 1.5; margin: .3rem 0 0; }
+    .reading-list { margin: 1.6rem 0 0; }
+    .reading-list > div { display: grid; grid-template-columns: 180px 1fr; gap: 1rem; border-top: 1px solid var(--cp-border); padding: .9rem 0; }
+    .reading-list dt { font-size: 14px; font-weight: 650; }
+    .reading-list dd { margin: 0; font-size: 14px; color: var(--cp-text-muted); }
+    footer { padding-top: 2rem; font-size: 13px; color: var(--cp-text-muted); display: flex; justify-content: space-between; gap: 1rem; }
+    @media (max-width: 1000px) {
+      .layout { grid-template-columns: 185px minmax(0, 1fr); gap: 32px; padding: 0 24px; }
+      h1 { font-size: 40px; }
+      .pipeline { grid-template-columns: 1fr; }
+      .pipeline li { padding: .75rem .5rem; }
+      .pipeline li + li { border-left: 0; border-top: 1px solid var(--cp-border); padding-left: .5rem; }
+      .pipeline b { display: inline; margin-right: .5rem; }
+      .flow-row.wide { grid-template-columns: 1fr; }
+      .flow-row.wide .flow-node { min-height: 70px; }
+      .flow-row.wide .flow-node + .flow-node::before { content: "\2193"; left: calc(50% - 14px); top: -31px; }
+      .window-figure { grid-template-columns: 1fr; }
+      .window-figure .diagram-arrow { transform: rotate(90deg); }
+      .model-transfer { height: auto; padding: .8rem 0; }
+      .model-transfer svg { display: none; }
+      .model-transfer span { position: static; }
+    }
+    @media (max-width: 720px) {
+      .topbar-inner { min-height: 62px; padding: .7rem 20px; }
+      .brand { font-size: 13px; max-width: 16ch; line-height: 1.3; }
+      .top-actions { gap: .8rem; font-size: 12px; }
+      .layout { display: block; padding: 0 20px; }
+      .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--cp-border); padding: 1rem 0; }
+      .nav-label { margin-bottom: .6rem; }
+      .sidebar ol { display: grid; grid-template-columns: 1fr 1fr; gap: .1rem .4rem; }
+      .sidebar a { font-size: 12px; padding: .35rem .4rem; gap: .4rem; }
+      .sidebar .source-link { display: none; }
+      .intro { padding: 32px 0; }
+      h1 { font-size: 34px; }
+      .intro .lead { font-size: 19px; }
+      h2 { font-size: 27px; }
+      section { padding: 36px 0; }
+      body { font-size: 16px; }
+      .experiment { padding: 1rem; }
+      .controls { grid-template-columns: 1fr; }
+      .result { gap: 1rem; align-items: start; }
+      .reading-list > div { grid-template-columns: 1fr; gap: .3rem; }
+      footer { flex-direction: column; }
+      .flow-row { grid-template-columns: 1fr; }
+      .flow-node { min-height: 70px; }
+      .flow-node + .flow-node::before { content: "\2193"; left: calc(50% - 14px); top: -31px; }
+      .error-reduction { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .error-reduction > .diagram-arrow { grid-column: 1 / -1; transform: rotate(90deg); }
+      .error-reduction > .score-total { grid-column: 1 / -1; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      .topbar, .sidebar, .skip, .controls { display: none; }
+      .layout { display: block; max-width: none; padding: 0; }
+      body { font-size: 11pt; background: var(--cp-surface); }
+      .intro, section { padding: 1rem 0; }
+      h1 { font-size: 28pt; }
+      h2, h3 { break-after: avoid; }
+      figure, tr, .note, .experiment { break-inside: avoid; }
+      .table-wrap { overflow: visible; }
+      a { color: var(--cp-text); }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#contenuto">Vai al contenuto</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#contenuto"><span>FABRIC</span> / Anomaly Detection</a>
+      <div class="top-actions">
+        <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo">Repository</a>
+        <label class="theme-control" for="dark-theme"><input id="dark-theme" type="checkbox"> Tema scuro</label>
+      </div>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="sidebar" aria-label="Indice della guida">
+      <div class="nav-label">Percorso di lettura</div>
+      <ol>
+        <li><a href="#problema"><span>01</span> Il problema</a></li>
+        <li><a href="#dati"><span>02</span> Macchine e dati</a></li>
+        <li><a href="#finestre"><span>03</span> Dalle misure alle finestre</a></li>
+        <li><a href="#modello"><span>04</span> Il punteggio di anomalia</a></li>
+        <li><a href="#training"><span>05</span> Addestramento e soglia</a></li>
+        <li><a href="#inferenza"><span>06</span> Esecuzione in Fabric</a></li>
+        <li><a href="#verifica"><span>07</span> Lettura dei risultati</a></li>
+        <li><a href="#limiti"><span>08</span> Limiti e verifiche</a></li>
+        <li><a href="#avvio"><span>09</span> Riprodurre la demo</a></li>
+      </ol>
+      <a class="source-link" href="#fonti">Mappa dei sorgenti</a>
+    </nav>
+    <main id="contenuto">
+      <header class="intro">
+        <div class="eyebrow">Guida al repository / 03 ottobre 2026</div>
+        <h1>Anomaly Detection su Microsoft Fabric</h1>
+        <p class="lead">Dalle misure di una macchina a una segnalazione: modelli addestrati su sequenze di sensori ed eseguiti nel database KQL.</p>
+        <p>Una macchina pu&ograve; avere valori plausibili su ogni sensore e una combinazione insolita di carico, potenza e coppia. Questo progetto studia come riconoscere tali comportamenti con un modello dedicato a ciascuna macchina, mantenendo acquisizione, inferenza e consultazione in Microsoft Fabric.</p>
+        <p class="scope">La guida descrive il codice presente nel repository. I risultati riportati provengono dagli artefatti salvati; lo stato del deployment cloud non &egrave; stato verificato durante questa analisi.</p>
+      </header>
+
+      <section id="problema" aria-labelledby="titolo-problema">
+        <div class="section-number">01 / Obiettivo</div>
+        <h2 id="titolo-problema">Che cosa rende insolita una misura?</h2>
+        <p>Consideriamo il mandrino della macchina <strong>M-003</strong>, cio&egrave; il componente che fa ruotare l&rsquo;utensile. Il suo carico indica quanto &egrave; impegnato, la potenza misura l&rsquo;energia assorbita per unit&agrave; di tempo e la coppia descrive l&rsquo;azione che produce la rotazione. Durante una lavorazione queste grandezze variano insieme. Per valutare un nuovo campione serve quindi anche il contesto degli altri sensori e dei secondi precedenti.</p>
+        <p>Una <em>serie temporale</em> &egrave; una sequenza di misure ordinate nel tempo. Fabric offre funzioni KQL native come <code>series_decompose_anomalies()</code>, che ricavano una componente attesa da andamento e stagionalit&agrave; di una serie e cercano deviazioni nei residui. &Egrave; un punto di partenza utile quando il comportamento di un singolo segnale descrive bene il problema.</p>
+        <p>Qui si esplora un rilevamento <em>multivariato</em>: pi&ugrave; sensori entrano insieme nello stesso modello. Il modello apprende esempi di funzionamento normale; un errore elevato nella loro ricostruzione diventa una segnalazione da esaminare. Il repository implementa questo percorso personalizzato, senza un confronto sperimentale che dimostri una superiorit&agrave; rispetto alle funzioni native.</p>
+        <figure class="visual-figure" id="diagramma-flusso" aria-labelledby="flusso-caption">
+          <span class="visual-title">Due percorsi: preparare il modello, applicarlo ai nuovi dati</span>
+          <p class="lane-label">A / Preparazione offline</p>
+          <ol class="flow-row" aria-label="Percorso di addestramento">
+            <li class="flow-node"><strong>Sequenze normali</strong><small>Esempi di funzionamento della macchina</small></li>
+            <li class="flow-node"><strong>Addestramento</strong><small>Computer locale o Azure Machine Learning</small></li>
+            <li class="flow-node accent"><strong>Registro models</strong><small>Modello ONNX, scaler e soglia</small></li>
+          </ol>
+          <div class="model-transfer"><svg viewBox="0 0 1000 70" preserveAspectRatio="none" aria-hidden="true"><path d="M833 0V16H705V62 M698 54L705 62 712 54"/></svg><span>Modello e metadati alimentano lo scoring</span></div>
+          <p class="lane-label">B / Analisi dei nuovi eventi</p>
+          <ol class="flow-row wide" aria-label="Percorso della telemetria fino alle segnalazioni">
+            <li class="flow-node"><strong>Simulatore</strong><small>Misure delle quattro macchine</small></li>
+            <li class="flow-node"><strong>Eventstream</strong><small>Trasporto degli eventi</small></li>
+            <li class="flow-node"><strong>Finestre KQL</strong><small>Da raw_telemetry, nell&rsquo;Eventhouse</small></li>
+            <li class="flow-node accent"><strong>Scoring ONNX</strong><small>Plugin python() nell&rsquo;Eventhouse</small></li>
+            <li class="flow-node success"><strong>anomalies</strong><small>Consultazione da dashboard e pannello</small></li>
+          </ol>
+          <figcaption id="flusso-caption">Il training produce un artefatto riutilizzabile. Nel flusso degli eventi si applica quel modello alle finestre; la tabella anomalies riceve solo quelle che superano soglia e filtro di attivit&agrave;.</figcaption>
+        </figure>
+        <p class="source">Riferimento: <a href="https://learn.microsoft.com/kusto/query/series-decompose-anomalies-function?view=microsoft-fabric">rilevamento nativo con series_decompose_anomalies()</a>.</p>
+      </section>
+
+      <section id="dati" aria-labelledby="titolo-dati">
+        <div class="section-number">02 / Sorgenti</div>
+        <h2 id="titolo-dati">Quattro macchine, tre origini dei dati</h2>
+        <p>La demo produce <em>telemetria</em>, cio&egrave; misure associate a una macchina, un sensore e un istante. Il simulatore cloud combina tre metodi di generazione. Per M-003 usa un motore costruito a partire da un profilo di dati CNC reali; CNC indica una macchina a controllo numerico. Il flusso della demo resta generato, non &egrave; una connessione diretta a un impianto.</p>
+        <div class="table-wrap" role="region" aria-label="Sorgenti delle quattro macchine" tabindex="0">
+          <table>
+            <caption>Configurazione prevista dal simulatore cloud e dalle quattro policy KQL</caption>
+            <thead><tr><th scope="col">Macchina</th><th scope="col">Sensori</th><th scope="col">Origine</th><th scope="col">Soglia salvata</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">M-001</th><td>8: temperature, vibrazioni, corrente, giri, pressione e potenza</td><td>Simulazione fisica con stati operativi</td><td class="numeric">2,5</td></tr>
+              <tr><th scope="row">M-002</th><td>3: carico, potenza e coppia del mandrino</td><td>Ripetizione di una traccia sintetica generata offline da synthgen</td><td class="numeric">2,3964</td></tr>
+              <tr><th scope="row">M-003</th><td>3: carico, potenza e coppia del mandrino</td><td>Motore statistico basato su un profilo CNC reale</td><td class="numeric">1,9374</td></tr>
+              <tr><th scope="row">M-004</th><td>8, come M-001</td><td>Simulazione fisica con stati operativi</td><td class="numeric">4,0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>I sensori CNC si chiamano <code>mandrino_load</code>, <code>mandrino_power</code> e <code>mandrino_torque</code>. Le unit&agrave; nei metadati sono rispettivamente percentuale, kW e N&middot;cm. Le soglie appartengono ai singoli modelli: confrontare direttamente i loro valori non permette di confrontare la gravit&agrave; dei guasti.</p>
+        <p>Il generatore <code>synthgen</code> prepara la traccia di M-002 prima dell&rsquo;esecuzione della demo. Durante la simulazione quella traccia viene riprodotta in ciclo; il generatore non partecipa al calcolo delle anomalie. Questa separazione evita di confondere il modello che produce dati sintetici con quello che li analizza.</p>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/src/simulate_machines.py">simulatore cloud</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/models">artefatti dei modelli</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy per macchina</a>.</p>
+      </section>
+
+      <section id="finestre" aria-labelledby="titolo-finestre">
+        <div class="section-number">03 / Preparazione</div>
+        <h2 id="titolo-finestre">Dalle singole misure a una sequenza</h2>
+        <p>Ogni evento contiene una sola misura. Per esempio, questo messaggio associa un valore di potenza a M-003; i numeri sono illustrativi:</p>
+        <pre><code>{
+  "machineId": "M-003",
+  "sensorId": "mandrino_power",
+  "ts": "2026-10-03T10:00:00Z",
+  "value": 8.4,
+  "quality": 192
+}</code></pre>
+        <p><code>ts</code> &egrave; il tempo della misura in UTC, indicato dal suffisso <code>Z</code>. <code>quality</code> conserva il codice di qualit&agrave; del campione; 192 &egrave; usato per i valori validi. Eventstream consegna gli eventi al database KQL nell&rsquo;Eventhouse, il contenitore Fabric dedicato all&rsquo;analisi degli eventi.</p>
+        <p>La tabella <code>raw_telemetry</code> usa il formato <em>long</em>: una riga per sensore e istante, con colonne come <code>machine_id</code>, <code>sensor_id</code>, <code>ts</code> e <code>value</code>. Questo permette di conservare nello stesso schema macchine con sensori diversi. Il modello richiede invece una matrice con una colonna per sensore e una riga per passo temporale.</p>
+        <ol class="sequence">
+          <li>La funzione batch filtra la macchina e i sensori indicati dal modello. Raggruppa le letture in intervalli di un secondo, calcolando la media se ci sono pi&ugrave; valori dello stesso sensore.</li>
+          <li>Allinea i sensori di ogni intervallo e aggiunge fino a 63 intervalli precedenti come contesto. Costruisce <em>finestre</em>, blocchi di 64 passi, e conserva quelli completi che terminano nei nuovi dati.</li>
+          <li>Ordina le colonne secondo i metadati del modello. M-003 ha quindi un ingresso di 64 &times; 3 valori; M-001 e M-004 hanno 64 &times; 8 valori.</li>
+        </ol>
+        <p>Con campioni regolari a 1 Hz, cio&egrave; uno al secondo, la finestra contiene circa un minuto di comportamento. Il codice conta gli intervalli presenti: se mancano secondi, 64 righe possono coprire pi&ugrave; tempo. Un sensore assente in una riga viene sostituito con zero dallo scorer, perci&ograve; dati mancanti e qualit&agrave; richiedono controlli espliciti prima di usare il sistema su un impianto.</p>
+        <figure class="visual-figure" id="diagramma-finestra" aria-labelledby="finestra-caption">
+          <span class="visual-title">M-003: da tre eventi a una riga della finestra</span>
+          <div class="window-figure">
+            <div>
+              <div class="diagram-label">Eventi separati, stesso secondo</div>
+              <div class="event-list">
+                <div class="event-row"><span>00 s</span><span>Carico</span><b>42 %</b></div>
+                <div class="event-row power"><span>00 s</span><span>Potenza</span><b>8,4 kW</b></div>
+                <div class="event-row torque"><span>00 s</span><span>Coppia</span><b>3.200 N&middot;cm</b></div>
+              </div>
+            </div>
+            <span class="diagram-arrow" aria-hidden="true">&rarr;</span>
+            <div>
+              <div class="diagram-label">Sensori allineati, ordine fisso</div>
+              <div class="sample-matrix" role="img" aria-label="Matrice illustrativa: colonne carico, potenza e coppia. Prima riga 42, 8.4, 3200; seconda 43, 8.6, 3280. Si prosegue fino al sessantaquattresimo passo.">
+                <span class="matrix-label">Passo</span><span class="matrix-label">Carico %</span><span class="matrix-label">Pot. kW</span><span class="matrix-label">Coppia N&middot;cm</span>
+                <span class="matrix-label">1</span><span class="load-cell">42</span><span class="power-cell">8,4</span><span class="torque-cell">3.200</span>
+                <span class="matrix-label">2</span><span>43</span><span>8,6</span><span>3.280</span>
+                <span class="matrix-label">&vellip;</span><span>&vellip;</span><span>&vellip;</span><span>&vellip;</span>
+                <span class="matrix-label">64</span><span>41</span><span>8,2</span><span>3.120</span>
+              </div>
+              <div class="window-shape"><strong>64 passi &times; 3 sensori</strong><br>192 valori, poi standardizzati con lo scaler</div>
+            </div>
+          </div>
+          <figcaption id="finestra-caption">Valori illustrativi. L&rsquo;allineamento mette nella stessa riga le misure dello stesso intervallo; le righe ordinate nel tempo formano l&rsquo;ingresso multivariato.</figcaption>
+        </figure>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/01_tables.kql">schema delle tabelle</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/03_scoring_functions.kql">build_multivariate_windows_batch e scorer</a>.</p>
+      </section>
+
+      <section id="modello" aria-labelledby="titolo-modello">
+        <div class="section-number">04 / Modello</div>
+        <h2 id="titolo-modello">Misurare l&rsquo;errore di ricostruzione</h2>
+        <p>Potenza e coppia hanno scale numeriche diverse. Prima del modello, ogni sensore viene <em>standardizzato</em>: si sottrae la media dei dati di addestramento e si divide per la loro deviazione standard, che ne misura la dispersione. Media e deviazione sono salvate nello <em>scaler</em> e riutilizzate durante l&rsquo;inferenza, cio&egrave; l&rsquo;applicazione del modello a nuovi dati.</p>
+        <p>Un <em>autoencoder</em> &egrave; una rete addestrata a ricostruire il proprio ingresso. La variante scelta usa un <em>Transformer</em>: il meccanismo di attenzione mette in relazione passi diversi della sequenza. Dopo aver appreso dati normali, la rete produce una ricostruzione della finestra; la differenza rispetto all&rsquo;ingresso genera il punteggio. Una ricostruzione accurata di un&rsquo;anomalia pu&ograve; comunque produrre un punteggio basso.</p>
+        <p>Per i modelli CNC salvati, il calcolo &egrave; <code>maxmean</code>: per ogni sensore si fa la media dei 64 errori al quadrato, poi si prende la maggiore delle medie. Cos&igrave; un sensore con errore elevato pu&ograve; determinare il risultato anche quando gli altri due sono ricostruiti bene.</p>
+        <div class="formula" aria-label="Definizioni della standardizzazione e del punteggio">
+          valore standardizzato = (valore &minus; media) / deviazione standard<br>
+          errore per sensore = media dei 64 errori di ricostruzione al quadrato<br>
+          score = massimo degli errori per sensore
+        </div>
+        <figure class="visual-figure" id="diagramma-autoencoder" aria-labelledby="autoencoder-caption">
+          <span class="visual-title">Dalla ricostruzione a un solo punteggio</span>
+          <div class="visual-legend" aria-label="Legenda dei sensori"><span><i aria-hidden="true"></i>Carico</span><span><i class="power-key" aria-hidden="true"></i>Potenza</span><span><i class="torque-key" aria-hidden="true"></i>Coppia</span></div>
+          <ol class="flow-row" aria-label="Trasformazione della finestra attraverso il modello">
+            <li class="flow-node">
+              <strong>Ingresso X</strong><small>Tre sequenze standardizzate</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Tre segnali schematici; la potenza contiene un aumento temporaneo.">
+                <path class="axis" d="M5 30H175 M5 63H175 M5 96H175"/>
+                <path class="load-line" d="M5 23L20 22 35 16 50 17 65 21 80 15 95 18 110 14 125 20 140 17 155 22 175 18"/>
+                <path class="power-line" d="M5 57L20 56 35 52 50 53 60 55 60 34 100 34 100 54 110 50 125 55 140 52 155 57 175 53"/>
+                <path class="torque-line" d="M5 91L20 90 35 84 50 85 65 89 80 83 95 86 110 82 125 88 140 85 155 90 175 86"/>
+              </svg>
+            </li>
+            <li class="flow-node accent">
+              <strong>Transformer AE</strong><small>Relazioni fra passi temporali</small>
+              <div class="model-core"><span>Encoder</span><span class="connection" aria-hidden="true">&darr;</span><span>Decoder</span></div>
+              <small>Il decoder usa la rappresentazione dell&rsquo;encoder e query apprese.</small>
+            </li>
+            <li class="flow-node">
+              <strong>Ricostruzione X&#770;</strong><small>La sequenza restituita dal modello</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Ricostruzione schematica dei tre segnali; l'aumento della potenza non viene ricostruito.">
+                <path class="axis" d="M5 30H175 M5 63H175 M5 96H175"/>
+                <path class="load-line" d="M5 23L20 22 35 16 50 17 65 21 80 15 95 18 110 14 125 20 140 17 155 22 175 18"/>
+                <path class="power-line" d="M5 57L20 56 35 52 50 53 65 57 80 51 95 54 110 50 125 55 140 52 155 57 175 53"/>
+                <path class="torque-line" d="M5 91L20 90 35 84 50 85 65 89 80 83 95 86 110 82 125 88 140 85 155 90 175 86"/>
+              </svg>
+            </li>
+          </ol>
+          <p class="lane-label" style="margin-top: 1.4rem">Confronto X con X&#770; &rarr; media dell&rsquo;errore al quadrato per sensore</p>
+          <div class="error-reduction" aria-label="Esempio di aggregazione: carico 0, potenza 2.25, coppia 0. Il massimo, e quindi lo score, e 2.25.">
+            <div>Carico<b>0,00</b></div><div class="selected">Potenza<b>2,25</b></div><div>Coppia<b>0,00</b></div><span class="diagram-arrow" aria-hidden="true">&rarr;</span><div class="selected score-total">Massimo = score<b>2,25</b></div>
+          </div>
+          <figcaption id="autoencoder-caption">Schema illustrativo, non output del modello. I numeri riprendono il caso sviluppato sotto: errore di 3 per 16 campioni sulla potenza e nullo sugli altri sensori. Il modello pu&ograve; anche ricostruire un evento anomalo, producendo allora un errore basso.</figcaption>
+        </figure>
+        <h3>Perch&eacute; la durata dell&rsquo;errore conta</h3>
+        <p>Supponiamo che la ricostruzione sbagli di 3 unit&agrave; standardizzate su un solo sensore e sia esatta altrove. Un errore di un campione produce <code>9 / 64 = 0,1406</code>; lo stesso errore per 16 campioni produce <code>16 &times; 9 / 64 = 2,25</code>. Solo il secondo supera la soglia salvata di M-003, circa 1,9374. Questo esempio spiega la diluizione temporale di un evento breve.</p>
+        <div class="experiment" id="esperimento">
+          <h3>Una finestra di 64 campioni</h3>
+          <p class="definition">Calcolo illustrativo, senza eseguire ONNX. L&rsquo;errore &egrave; costante su un solo sensore per la durata scelta e nullo negli altri campioni. Lo stato attivo assegna al filtro un valore esemplificativo di 1; lo stato inattivo assegna 0,2.</p>
+          <figure>
+            <canvas id="error-chart" class="plot" role="img" aria-label="Errore di ricostruzione illustrativo: 3 unit&agrave; per 16 dei 64 campioni">Errore di 3 unit&agrave; per 16 campioni su 64; score 2,25.</canvas>
+            <figcaption>Errore standardizzato nel tempo, prima del quadrato e della media.</figcaption>
+          </figure>
+          <div class="controls">
+            <div class="control"><label for="residual">Errore <output id="residual-value" for="residual">3,00</output></label><input id="residual" type="range" min="0" max="6" step="0.25" value="3"></div>
+            <div class="control"><label for="duration">Durata in campioni <output id="duration-value" for="duration">16</output></label><input id="duration" type="range" min="1" max="64" step="1" value="16"></div>
+            <div class="control"><label for="threshold">Soglia</label><input id="threshold" type="number" min="0" max="100" step="any" value="1.9374" required></div>
+            <label class="activity-control" for="active"><input id="active" type="checkbox" checked> Macchina attiva</label>
+          </div>
+          <div class="result" id="result" data-state="anomaly" role="status" aria-live="polite" aria-atomic="true">
+            <div><div class="score-label">SCORE</div><output class="score-value" id="score" for="residual duration">2,2500</output></div>
+            <div class="decision"><strong id="decision">Segnalazione</strong><p id="decision-detail">2,2500 &gt; 1,9374 e activity = 1.</p></div>
+          </div>
+          <noscript><p>I controlli richiedono JavaScript. Nell&rsquo;esempio iniziale lo score &egrave; 2,25: supera 1,9374 con macchina attiva.</p></noscript>
+        </div>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">calcolo maxmean ed esportazione</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-003/metadata.json">metadati M-003</a>.</p>
+      </section>
+
+      <section id="training" aria-labelledby="titolo-training">
+        <div class="section-number">05 / Addestramento</div>
+        <h2 id="titolo-training">Apprendere il normale e scegliere la soglia</h2>
+        <p>Il <em>training</em> modifica i pesi della rete per ridurre l&rsquo;errore sui dati normali. La <em>calibrazione</em> sceglie invece la soglia oltre la quale segnalare un caso. Sono operazioni distinte: abbassare la soglia aumenta le segnalazioni, mentre riaddestrare cambia il modo in cui la rete ricostruisce le sequenze.</p>
+        <p>Per M-002 e M-003, <code>tools/cnc_ae_lab.py</code> concentra generazione delle finestre, addestramento, confronto delle varianti ed esportazione. Il driver Azure Machine Learning avvia lo stesso laboratorio nel cloud. Cambia il luogo di esecuzione del training; l&rsquo;inferenza continua a essere eseguita in Fabric.</p>
+        <p>Per confrontare le varianti si inseriscono anomalie sintetiche in dati di valutazione separati. La <em>precision</em> &egrave; la quota di finestre segnalate che contengono un&rsquo;anomalia inserita; la <em>recall</em> &egrave; la quota di finestre anomale che vengono segnalate. <em>F1</em> &egrave; la loro media armonica, un indicatore che diminuisce quando una delle due &egrave; bassa. Il valore massimo delle tre metriche &egrave; 1.</p>
+        <ol class="sequence">
+          <li><strong>Separare i dati.</strong> Per la traccia finita di M-002, il laboratorio riserva il 18% finale alla valutazione e calibrazione. Per M-003 pu&ograve; generare un nuovo insieme dal profilo con un seme casuale diverso.</li>
+          <li><strong>Confrontare sei varianti.</strong> Vengono provate capacit&agrave; e aggregazioni diverse, anche con <em>denoising</em>: ingresso disturbato e ricostruzione del dato pulito. Si sceglie la variante con F1 migliore sulle anomalie sintetiche di selezione.</li>
+          <li><strong>Riaddestrare e calibrare.</strong> Il vincitore viene riaddestrato sui dati normali riservati al modello. La soglia &egrave; il massimo fra quella che ottimizza F1 e il 97&deg; percentile dei punteggi normali della valutazione finale.</li>
+          <li><strong>Esportare il risultato.</strong> Il laboratorio salva modello, scaler e metadati, misura la dimensione ONNX e confronta numericamente i punteggi esportati con quelli PyTorch.</li>
+        </ol>
+        <p>Il 97&deg; percentile &egrave; un valore sotto il quale cade circa il 97% dei punteggi normali osservati. Usarlo come limite inferiore della soglia contiene i falsi allarmi intorno al 3% su quelle finestre di calibrazione. Non &egrave; una garanzia sui dati futuri. I modelli a otto sensori di M-001 e M-004 seguono una pipeline di training distinta.</p>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">laboratorio CNC</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/cloud-training/submit_cnc_sota.py">driver Azure ML</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">resoconto del training</a>.</p>
+      </section>
+
+      <section id="inferenza" aria-labelledby="titolo-inferenza">
+        <div class="section-number">06 / Esecuzione</div>
+        <h2 id="titolo-inferenza">Applicare il modello dentro Fabric</h2>
+        <p><em>ONNX</em> &egrave; un formato portabile per rappresentare modelli e operazioni. Il progetto salva i pesi in precisione ridotta FP16 per contenere le dimensioni e registra il file, codificato in Base64, nella tabella <code>models</code>. Ogni macchina ha una chiave come <code>transformer_ae_small__M-003</code>, una versione, l&rsquo;ordine dei sensori, lo scaler e la soglia.</p>
+        <p>Il laboratorio impone un budget di 1 MiB al payload Base64 per il percorso inline scelto. I metadati riportano circa 656 KiB per M-003 e 882 KiB per M-002. Il vincolo riguarda questa modalit&agrave; di distribuzione: modelli pi&ugrave; grandi richiedono una scelta diversa per conservarli ed eseguirli.</p>
+        <p>Una <em>update policy</em> &egrave; una regola che esegue una trasformazione quando arrivano dati nella tabella sorgente e ne inserisce il risultato nella tabella di destinazione. Le quattro policy leggono i nuovi batch di <code>raw_telemetry</code>, costruiscono le finestre e chiamano <code>python()</code>. Il plugin esegue Python in un ambiente isolato; ONNX Runtime carica il modello e restituisce lo score.</p>
+        <h3>La decisione include lo stato operativo</h3>
+        <p>Un modello addestrato sulla macchina in lavorazione pu&ograve; ricostruire male anche una pausa regolare. Per limitare questi falsi allarmi, lo scorer calcola <code>activity</code>: per ogni sensore divide la media della finestra per la media di training, poi prende la mediana dei rapporti validi. Valori vicini a 1 indicano un livello comparabile al regime di training; valori vicini a zero indicano misure molto ridotte.</p>
+        <p>La policy conserva una segnalazione solo quando valgono entrambe le condizioni seguenti, qui riassunte come espressione logica:</p>
+        <pre><code>activity &gt;= 0.5 and score &gt; threshold</code></pre>
+        <p>Il filtro di attivit&agrave; &egrave; una stima, non una classificazione certificata dello stato macchina. La riga prodotta in <code>anomalies</code> include macchina, inizio e fine della finestra, score e versione del modello; essendo multivariata, non attribuisce il problema a un singolo sensore. La soglia viene letta dai metadati, quindi pu&ograve; essere ricalibrata e registrata senza riaddestrare la rete.</p>
+        <h3>Il tempo di acquisizione fa parte della latenza</h3>
+        <p>Il plugin Python &egrave; supportato nelle update policy con acquisizione in coda, ma non con <em>streaming ingestion</em>, il percorso di ingestione a bassa latenza. Per questo il codice disabilita lo streaming sulla tabella e configura un tempo massimo di batching di un minuto. Alla raccolta del batch si aggiungono completamento della finestra, esecuzione del modello e aggiornamento della visualizzazione: la configurazione non offre una latenza istantanea n&eacute; un limite end-to-end garantito.</p>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/02_models.kql">registro modelli</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">regole di decisione</a>, <a href="https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric">plugin Python e vincoli di ingestione</a>.</p>
+      </section>
+
+      <section id="verifica" aria-labelledby="titolo-verifica">
+        <div class="section-number">07 / Valutazione</div>
+        <h2 id="titolo-verifica">Che cosa dimostrano i risultati?</h2>
+        <p>Per sapere se una segnalazione &egrave; utile occorre un riferimento. La demo inserisce perturbazioni controllate: <em>spike</em>, un aumento temporaneo; <em>drift</em>, una deriva progressiva; <em>stuck</em>, un valore mantenuto fisso. Conoscendone tempi e destinazione si pu&ograve; confrontare l&rsquo;evento inserito con la risposta del sistema.</p>
+        <p>Il pannello operativo, protetto da Microsoft Entra ID, mostra telemetria e intervalli di iniezione. Un processo nel backend legge periodicamente le anomalie da Fabric, ogni 15 secondi per impostazione predefinita quando &egrave; abilitato. Il Real-Time Dashboard offre un&rsquo;altra vista sui dati del database. La pagina che stai leggendo &egrave; documentazione statica e non accede a quei servizi.</p>
+        <p>I metadati dei due modelli CNC conservano le metriche della valutazione offline. La tabella riporta i valori alla soglia scelta, arrotondati a tre decimali.</p>
+        <div class="table-wrap" role="region" aria-label="Metriche offline salvate nei metadati" tabindex="0">
+          <table id="metrics-table">
+            <caption>Valutazione con anomalie sintetiche, artefatti del training del 5 giugno 2026</caption>
+            <thead><tr><th scope="col">Modello</th><th scope="col">Variante</th><th scope="col" class="numeric">Parametri</th><th scope="col" class="numeric">Precision</th><th scope="col" class="numeric">Recall</th><th scope="col" class="numeric">F1</th></tr></thead>
+            <tbody>
+              <tr data-machine="M-002"><th scope="row">M-002</th><td>denoise64d</td><td class="numeric">234.275</td><td class="numeric" data-metric="precision_at_thr">0,943</td><td class="numeric" data-metric="recall_at_thr">0,730</td><td class="numeric" data-metric="f1_at_thr">0,823</td></tr>
+              <tr data-machine="M-003"><th scope="row">M-003</th><td>base56</td><td class="numeric">161.419</td><td class="numeric" data-metric="precision_at_thr">0,954</td><td class="numeric" data-metric="recall_at_thr">0,869</td><td class="numeric" data-metric="f1_at_thr">0,910</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>M-002 ha una recall inferiore: la soglia scelta per contenere i falsi allarmi lascia passare pi&ugrave; finestre anomale. Questi valori si riferiscono a finestre, spesso sovrapposte, non al numero di guasti indipendenti. Inoltre i due modelli sono valutati su sorgenti diverse: il confronto non isola la sola qualit&agrave; dell&rsquo;architettura.</p>
+        <div class="note"><p><strong>Calibrazione e test indipendente.</strong> Il laboratorio sceglie la soglia e riporta queste metriche sullo stesso insieme finale. I dati sono separati dal training dei pesi, ma vengono usati per una scelta del sistema. Una stima indipendente della generalizzazione richiede un ulteriore insieme di test, con soglia gi&agrave; fissata.</p></div>
+        <p>Nel flusso live, l&rsquo;abbinamento tra iniezioni e rilevamenti &egrave; invece temporale e pu&ograve; includere una tolleranza. Una singola iniezione pu&ograve; produrre pi&ugrave; segnalazioni. Prima di leggere precision e recall live occorre verificare quali eventi e finestre sono contati, soprattutto nei casi senza abbinamento.</p>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-002/metadata.json">metriche M-002</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-003/metadata.json">metriche M-003</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/src/fabric_poller.py">lettura delle detections</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/07_classification.kql">classificazione live</a>.</p>
+      </section>
+
+      <section id="limiti" aria-labelledby="titolo-limiti">
+        <div class="section-number">08 / Confini della demo</div>
+        <h2 id="titolo-limiti">Che cosa verificare prima di un impianto reale</h2>
+        <h3>Copertura del rilevatore</h3>
+        <p>L&rsquo;esempio di M-003 mostra perch&eacute; un errore breve pu&ograve; restare sotto soglia. Un segnale bloccato pu&ograve; essere ricostruito bene e sfuggire al modello. I metadati di M-004 riportano proprio eventi di temperatura e vibrazione non separabili dal rumore normale con la sola soglia. Per coprirli servono prove su altri punteggi o rilevatori dedicati.</p>
+        <h3>Regimi operativi e qualit&agrave; dei dati</h3>
+        <p>Un cambio di materiale, utensile o carico pu&ograve; allontanare il comportamento dalla distribuzione di training e aumentare i falsi allarmi. Il filtro di attivit&agrave; riduce alcuni casi di macchina ferma, ma non verifica l&rsquo;intero regime operativo. Il percorso di scoring non filtra il campo <code>quality</code>; vanno quindi provati campioni invalidi, sensori mancanti, ritardi e duplicati, oltre ai casi regolari.</p>
+        <h3>Affidabilit&agrave; della catena</h3>
+        <p>Le update policy hanno <code>IsTransactional=false</code>: un errore nello scoring pu&ograve; lasciare intatti i dati grezzi senza produrre le relative anomalie. Servono monitoraggio dei fallimenti e una procedura di rielaborazione. Il costruttore batch aggiunge contesto storico, ma la gestione di replay e dati fuori ordine va verificata prima di attribuire alla pipeline una garanzia di elaborazione esattamente una volta.</p>
+        <h3>Codice, documentazione e servizi attivi</h3>
+        <p>Il README storico e la guida <code>docs/solution.md</code> indicano tre macchine analizzate; il file KQL attuale definisce quattro policy, compresa M-004. Analogamente, la vista materializzata wide &egrave; disponibile per analisi, mentre lo scoring automatico usa il costruttore batch. Questa pagina segue il codice e i metadati per queste scelte.</p>
+        <p>Il bootstrap crea anche elementi come pipeline di riaddestramento, Reflex/Activator, modello semantico e report. La presenza di questi contenitori non dimostra che riaddestramento automatico, notifiche Teams o invio di email siano configurati. Prima di un uso operativo occorre verificare collegamenti, autorizzazioni, latenza sotto carico e costi sulla capacit&agrave; scelta.</p>
+        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-004/metadata.json">limiti osservati su M-004</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy correnti</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/scripts/deploy.ps1">bootstrap degli elementi Fabric</a>.</p>
+      </section>
+
+      <section id="avvio" aria-labelledby="titolo-avvio">
+        <div class="section-number">09 / Riproduzione</div>
+        <h2 id="titolo-avvio">Preparare un ambiente di prova</h2>
+        <p>Per eseguire la pipeline servono Git, PowerShell 7+, un ambiente Python compatibile con le dipendenze del percorso scelto, una capacit&agrave; Fabric attiva e un account con i permessi necessari. Il plugin Python deve essere abilitato per lo scoring nel database KQL. Azure Container Apps e Azure Machine Learning servono rispettivamente per simulazione e training nel cloud; entrambi i percorsi hanno anche strumenti locali.</p>
+        <p>La preparazione inizia clonando il repository. Questi comandi creano soltanto una copia locale:</p>
+        <pre><code>git clone https://github.com/faustinopalma/anomaly-detection-fabric-demo.git
+cd anomaly-detection-fabric-demo</code></pre>
+        <ol class="sequence">
+          <li><strong>Configurare il computer.</strong> Seguire il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">runbook</a> per ambiente Python e dipendenze. Preparare <code>.env</code> dal modello <code>.env.example</code> solo se il file non esiste gi&agrave;, mantenendo credenziali e stringhe di connessione fuori da Git.</li>
+          <li><strong>Creare e collegare gli elementi.</strong> Il bootstrap prepara i contenitori Fabric; Eventstream richiede poi la sorgente e la destinazione. Applicare gli script KQL e abilitare il plugin secondo i passaggi del runbook. Queste operazioni modificano l&rsquo;ambiente: eseguirle su un workspace di prova autorizzato.</li>
+          <li><strong>Rendere disponibili i modelli.</strong> Verificare artefatti, nomi macchina, sensori e scaler, poi registrare i modelli richiesti dalle quattro policy. Per ricreare quelli CNC seguire il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">resoconto del training</a>; i dati locali opzionali non sono tutti inclusi nella clonazione.</li>
+          <li><strong>Avviare e osservare.</strong> Per riprodurre le sorgenti descritte qui usare la configurazione del <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/README.md">simulatore cloud</a>. La copia sotto <code>simulator-local</code> &egrave; un percorso distinto: verificarne le opzioni prima di presumere la stessa flotta. Controllare l&rsquo;arrivo delle misure, poi le finestre, infine le anomalie.</li>
+          <li><strong>Provare un evento controllato.</strong> Su M-003 attiva, inserire una perturbazione dal pannello. Annotare sensore, intensit&agrave; e intervallo; attendere acquisizione e scoring, quindi confrontare la finestra con la segnalazione e la versione del modello. L&rsquo;assenza di un risultato richiede prima di distinguere mancata acquisizione, errore di scoring e punteggio sotto soglia.</li>
+        </ol>
+        <p>Capacit&agrave; Fabric, simulatori cloud e job di training possono generare costi. Al termine delle prove verificare quali risorse devono rimanere attive e arrestare solo quelle previste dal proprio piano di test. La consultazione di questa guida non avvia alcuna risorsa.</p>
+        <div class="note"><p><strong>Il risultato da conservare.</strong> Per M-003, una segnalazione collega 64 passi dei tre sensori, uno scaler, una versione del modello e una regola di soglia. Questi elementi rendono il rilevamento ricostruibile; la conferma della causa fisica richiede dati ed esame dell&rsquo;impianto.</p></div>
+      </section>
+
+      <section id="fonti" aria-labelledby="titolo-fonti">
+        <div class="section-number">Riferimenti</div>
+        <h2 id="titolo-fonti">Mappa dei sorgenti</h2>
+        <p>I collegamenti puntano al ramo <code>main</code> e possono evolvere. Per riprodurre un risultato va conservato anche il commit usato insieme agli artefatti del modello.</p>
+        <dl class="reading-list">
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/simulator-cloud/src">simulator-cloud/src</a></dt><dd>Generazione, controlli operatore, API e lettura dei rilevamenti Fabric.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/kql">kql</a></dt><dd>Tabelle, registro ONNX, finestre, scoring, policy e correlazione degli eventi.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">tools/cnc_ae_lab.py</a></dt><dd>Training e calibrazione dei modelli CNC; le architetture alternative restano nei notebook.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/models">models</a></dt><dd>Pesi, formati ONNX, scaler, soglie e metriche salvate per macchina.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/webapp/README.md">webapp</a></dt><dd>Pannello operativo con accesso Entra ID, separato dalla documentazione pubblica.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/synthgen">synthgen</a></dt><dd>Generazione offline della traccia sintetica; non esegue il rilevamento delle anomalie.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">docs/RUNBOOK.md</a></dt><dd>Sequenza operativa di installazione e collegamento dei componenti.</dd></div>
+        </dl>
+      </section>
+      <footer><span>anomaly-detection-fabric-demo &middot; Guida in italiano</span><a href="#contenuto">Torna all&rsquo;inizio</a></footer>
+    </main>
+  </div>
+  <script>
+    (() => {
+      const themeToggle = document.getElementById("dark-theme");
+      const canvas = document.getElementById("error-chart");
+      const residual = document.getElementById("residual");
+      const duration = document.getElementById("duration");
+      const threshold = document.getElementById("threshold");
+      const active = document.getElementById("active");
+      const result = document.getElementById("result");
+      const format = (value, digits) => value.toLocaleString("it-IT", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+      themeToggle.checked = document.documentElement.dataset.theme === "dark";
+
+      function drawChart() {
+        const bounds = canvas.getBoundingClientRect();
+        const ratio = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(bounds.width * ratio);
+        canvas.height = Math.round(bounds.height * ratio);
+        const context = canvas.getContext("2d");
+        if (!context) return;
+        context.scale(ratio, ratio);
+        const colors = getComputedStyle(document.documentElement);
+        const color = (name) => colors.getPropertyValue(name).trim();
+        const width = bounds.width;
+        const height = bounds.height;
+        const left = 32;
+        const right = width - 12;
+        const top = 24;
+        const bottom = height - 32;
+        const chartWidth = right - left;
+        const chartHeight = bottom - top;
+        const samples = Number(duration.value);
+        const magnitude = Number(residual.value);
+        const start = Math.floor((64 - samples) / 2);
+        const sampleX = (sample) => left + chartWidth * sample / 64;
+        const valueY = (value) => bottom - chartHeight * value / 6;
+        context.fillStyle = color("--cp-surface");
+        context.fillRect(0, 0, width, height);
+        context.fillStyle = color("--cp-accent-soft");
+        context.fillRect(sampleX(start), top, chartWidth * samples / 64, chartHeight);
+        context.font = '12px "Segoe UI", sans-serif';
+        for (const tick of [0, 2, 4, 6]) {
+          context.strokeStyle = color("--cp-border");
+          context.lineWidth = 1;
+          context.beginPath();
+          context.moveTo(left, valueY(tick));
+          context.lineTo(right, valueY(tick));
+          context.stroke();
+          context.fillStyle = color("--cp-text-muted");
+          context.textAlign = "right";
+          context.fillText(String(tick), left - 9, valueY(tick) + 4);
+        }
+        context.strokeStyle = color("--cp-accent");
+        context.lineWidth = 2.5;
+        context.beginPath();
+        context.moveTo(left, bottom);
+        context.lineTo(sampleX(start), bottom);
+        context.lineTo(sampleX(start), valueY(magnitude));
+        context.lineTo(sampleX(start + samples), valueY(magnitude));
+        context.lineTo(sampleX(start + samples), bottom);
+        context.lineTo(right, bottom);
+        context.stroke();
+        context.fillStyle = color("--cp-text-muted");
+        context.textAlign = "left";
+        context.fillText("1", left, height - 10);
+        context.textAlign = "center";
+        context.fillText("Campioni", (left + right) / 2, height - 10);
+        context.textAlign = "right";
+        context.fillText("64", right, height - 10);
+        canvas.setAttribute("aria-label", `Errore illustrativo: ${format(magnitude, 2)} unit\u00e0 per ${samples} dei 64 campioni.`);
+      }
+
+      function updateExample() {
+        const magnitude = Number(residual.value);
+        const samples = Number(duration.value);
+        const score = samples * magnitude * magnitude / 64;
+        const validThreshold = threshold.validity.valid && Number.isFinite(threshold.valueAsNumber);
+        const limit = threshold.valueAsNumber;
+        const state = !validThreshold ? "invalid" : !active.checked ? "excluded" : score > limit ? "anomaly" : "normal";
+        document.getElementById("residual-value").textContent = format(magnitude, 2);
+        document.getElementById("duration-value").textContent = String(samples);
+        document.getElementById("score").textContent = format(score, 4);
+        result.dataset.state = state;
+        const titles = { invalid: "Soglia non valida", excluded: "Finestra esclusa", anomaly: "Segnalazione", normal: "Nessuna segnalazione" };
+        document.getElementById("decision").textContent = titles[state];
+        const detail = state === "invalid" ? "La soglia deve essere un numero tra 0 e 100."
+          : state === "excluded" ? "activity = 0,2: il filtro esclude la finestra, anche con score elevato."
+          : `${format(score, 4)} ${score > limit ? ">" : "\u2264"} ${format(limit, 4)} e activity = 1.`;
+        document.getElementById("decision-detail").textContent = detail;
+        drawChart();
+      }
+
+      for (const control of [residual, duration, threshold, active]) control.addEventListener("input", updateExample);
+      themeToggle.addEventListener("change", () => {
+        document.documentElement.dataset.theme = themeToggle.checked ? "dark" : "light";
+        drawChart();
+      });
+      new ResizeObserver(drawChart).observe(canvas);
+      updateExample();
+
+      const navLinks = [...document.querySelectorAll('.sidebar a[href^="#"]')];
+      const sections = navLinks.map((link) => document.querySelector(link.getAttribute("href")));
+      let scheduled = false;
+      function updateNavigation() {
+        scheduled = false;
+        let current = sections[0];
+        for (const section of sections) if (section.getBoundingClientRect().top <= 180) current = section;
+        for (const link of navLinks) {
+          if (link.hash === `#${current.id}`) link.setAttribute("aria-current", "location");
+          else link.removeAttribute("aria-current");
+        }
+      }
+      window.addEventListener("scroll", () => {
+        if (!scheduled) { scheduled = true; requestAnimationFrame(updateNavigation); }
+      }, { passive: true });
+      updateNavigation();
+    })();
+  </script>
+</body>
+</html>

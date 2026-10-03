@@ -1,0 +1,49 @@
+name: Publish documentation to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Verify publication scope
+        shell: bash
+        run: |
+          test -s site/index.html
+          test "$(find site -type f | wc -l)" -eq 1
+          test -z "$(find site -type l -print -quit)"
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload static guide only
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

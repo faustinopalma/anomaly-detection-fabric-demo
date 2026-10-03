@@ -35,6 +35,10 @@ The table describes the documented demo configuration. The M-004 model is a clou
 
 ## Documentation
 
+The [illustrated guide in Italian](https://faustinopalma.github.io/anomaly-detection-fabric-demo/) explains the current source configuration, window formation, model reconstruction, and evaluation limits. It includes three responsive diagrams and an interactive score example. The [self-contained HTML source](site/index.html) also opens locally, separately from the operator control panel.
+
+The [Pages workflow](.github/workflows/pages.yml) publishes only `site/`, excluding data, model binaries, local configuration, and session notes. Updates to the page on `main` trigger publication; the workflow can also be run manually. For a fork, first select **Settings > Pages > Build and deployment > Source: GitHub Actions** in that repository.
+
 For implementation details, follow the guides below.
 
 | Doc | What you get |

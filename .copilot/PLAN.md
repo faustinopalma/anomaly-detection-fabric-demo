@@ -1,6 +1,28 @@
 # Plan
 
-Last updated: 2026-09-29 (README objective clarification; documentation-only update).
+Last updated: 2026-10-03 (GitHub Pages guide; documentation only).
+
+## GitHub Pages guide (2026-10-03)
+
+- [x] Read the handoff, README, solution guide, and owning KQL update policy; identify documentation drift (four machine policies in code, three in older prose).
+- [x] Verify the batch scorer, model metadata, simulator sources, and evaluation boundaries needed for a step-by-step Italian guide.
+- [x] Create a self-contained static guide in `site/`, with an illustrative worked example, source links, and explicit implementation/validation limits.
+- [x] Add a GitHub Pages workflow that uploads only `site/`; add a README entry. No deployment of Fabric or Azure resources.
+- [x] Validate source claims, links, static publication scope, and desktop/mobile browser rendering and interactions (320/375/768/1440 px; light/dark; numeric edge cases; 21 source targets in HEAD).
+
+### Visual guide and publication (authorized 2026-10-03)
+
+- [x] Add responsive inline diagrams for the data/training paths, long-to-window transformation, and autoencoder reconstruction.
+- [x] Verify illustrations, numeric controls, accessibility labels, source links, and layout on desktop/mobile.
+- [ ] Commit/push only the guide, Pages workflow, README, and handoff files; enable GitHub Pages and verify the deployed HTML.
+
+GitHub Pages enabled using `build_type=workflow`; HTTPS enforced. Repository admin permission confirmed; local HEAD and origin/main aligned before publication. Diagram layout checks pass at 320/375/768/1440 px; desktop and mobile screenshots reviewed. Ready for the scoped commit and deployment verification.
+
+User explicitly authorized publication and requested diagrams/illustrations. Keep the static artifact self-contained and limited to `site/index.html`; no notebook/data/tool or Fabric/Azure changes. Check graph labels against the existing scorer and model implementation, then test the responsive layouts in the browser.
+
+Local hypothesis: the guide can be published independently of the operator webapp, and the current KQL source defines scoring for all four machines using batch-local windows. Check against `kql/03_scoring_functions.kql`, `kql/04_update_policy.kql`, and model metadata; browser-test the independent static artifact.
+
+Scope: preserve existing notebook/data/tool changes. Commit/push and GitHub Pages activation are now authorized for the documentation only. The live Fabric environment remains outside scope. Historical deployment notes below are not a fresh live verification.
 
 ## README objective clarification (2026-09-29)
 
