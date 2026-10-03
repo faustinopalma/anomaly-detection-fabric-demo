@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Guida ad anomaly-detection-fabric-demo: telemetria, Transformer autoencoder, ONNX e scoring nel database KQL di Microsoft Fabric.">
+  <meta name="description" content="Anomaly detection end-to-end in Microsoft Fabric: creare un modello ONNX, caricarlo nel database KQL, eseguirlo sui microbatch e attivare azioni. Generazione statistica di dati sintetici.">
   <meta name="color-scheme" content="light dark">
   <title>Anomaly Detection su Microsoft Fabric | Guida al repository</title>
   <script>
@@ -221,9 +221,10 @@
       .model-transfer span { position: static; }
     }
     @media (max-width: 720px) {
-      .topbar-inner { min-height: 62px; padding: .7rem 20px; }
-      .brand { font-size: 13px; max-width: 16ch; line-height: 1.3; }
-      .top-actions { gap: .8rem; font-size: 12px; }
+      .topbar-inner { min-height: 82px; padding: .7rem 20px; flex-wrap: wrap; gap: .5rem; }
+      .brand { font-size: 13px; max-width: none; flex-basis: 100%; line-height: 1.3; }
+      .top-actions { width: 100%; justify-content: space-between; gap: .8rem; font-size: 12px; }
+      .top-actions > a { flex-shrink: 0; white-space: nowrap; }
       .layout { display: block; padding: 0 20px; }
       .sidebar { position: static; max-height: none; border-bottom: 1px solid var(--cp-border); padding: 1rem 0; }
       .nav-label { margin-bottom: .6rem; }
@@ -277,290 +278,147 @@
     <nav class="sidebar" aria-label="Indice della guida">
       <div class="nav-label">Indice</div>
       <ol>
-        <li><a href="#problema"><span>01</span> Il problema</a></li>
-        <li><a href="#dati"><span>02</span> Macchine e dati</a></li>
-        <li><a href="#finestre"><span>03</span> Dalle misure alle finestre</a></li>
-        <li><a href="#modello"><span>04</span> Il punteggio di anomalia</a></li>
-        <li><a href="#training"><span>05</span> Addestramento e soglia</a></li>
-        <li><a href="#inferenza"><span>06</span> Esecuzione in Fabric</a></li>
-        <li><a href="#verifica"><span>07</span> Lettura dei risultati</a></li>
-        <li><a href="#limiti"><span>08</span> Limiti e verifiche</a></li>
-        <li><a href="#avvio"><span>09</span> Riprodurre la demo</a></li>
+        <li><a href="#problema"><span>01</span> Il flusso completo</a></li>
+        <li><a href="#modello"><span>02</span> Creare il modello ONNX</a></li>
+        <li><a href="#caricamento"><span>03</span> Caricarlo in Fabric</a></li>
+        <li><a href="#inferenza"><span>04</span> Eseguirlo sui microbatch</a></li>
+        <li><a href="#azioni"><span>05</span> Attivare un&rsquo;azione</a></li>
+        <li><a href="#sintesi"><span>06</span> Generare dati sintetici</a></li>
       </ol>
-      <a class="source-link" href="#fonti">Mappa dei sorgenti</a>
+      <a class="source-link" href="#avvio">Avvio e sorgenti</a>
     </nav>
     <main id="contenuto">
       <header class="intro">
-        <div class="eyebrow">Guida al repository / 03 ottobre 2026</div>
+        <div class="eyebrow">Demo end-to-end / 04 ottobre 2026</div>
         <h1>Anomaly Detection su Microsoft Fabric</h1>
-        <p class="lead">Rilevamento multivariato su telemetria simulata: un modello per macchina, eseguito nel database KQL di Fabric.</p>
-        <p class="scope">La guida descrive codice e artefatti salvati, non lo stato del deployment cloud, che non &egrave; stato verificato.</p>
+        <p class="lead">Dati simulati, difetti controllati, un modello ONNX eseguito in Fabric e azioni attivate dai rilevamenti.</p>
+        <p>Il progetto dimostra il flusso completo di anomaly detection. Il passaggio centrale &egrave; creare un modello custom, caricarlo nel database KQL di Fabric e metterlo in funzione all&rsquo;arrivo dei dati.</p>
       </header>
 
       <section id="problema" aria-labelledby="titolo-problema">
-        <div class="section-number">01 / Obiettivo</div>
-        <h2 id="titolo-problema">Anomalie tra sensori correlati</h2>
-        <p>Nel mandrino di <strong>M-003</strong>, che fa ruotare l&rsquo;utensile, carico, potenza e coppia variano insieme. Valori singolarmente plausibili possono formare una combinazione insolita: servono gli altri sensori e il contesto temporale.</p>
-        <p>La funzione KQL nativa <code>series_decompose_anomalies()</code> cerca deviazioni nei residui di una serie temporale, rimuovendone andamento e stagionalit&agrave;. Qui il rilevamento &egrave; invece <em>multivariato</em>: il modello ricostruisce sequenze di pi&ugrave; sensori, dopo aver appreso il funzionamento normale. Un errore elevato genera una segnalazione da esaminare, non una diagnosi.</p>
-        <p>Il repository non contiene un confronto sperimentale che dimostri superiorit&agrave; rispetto alle funzioni native.</p>
+        <div class="section-number">01 / Flusso</div>
+        <h2 id="titolo-problema">Dai dati all&rsquo;azione</h2>
+        <p>Il simulatore genera misure di macchine esemplificative e inserisce difetti controllati: un aumento improvviso, una deriva progressiva o un valore bloccato. I dati entrano in Fabric attraverso un endpoint di Eventstream, che li scrive nella tabella <code>raw_telemetry</code> del database KQL, all&rsquo;interno dell&rsquo;Eventhouse.</p>
+        <p>Il modello analizza sequenze di misure e produce un punteggio di anomalia. I rilevamenti vengono salvati in <code>anomalies</code>, consultati dalla dashboard e usati dalle regole di Fabric Activator per avviare le azioni configurate.</p>
         <figure class="visual-figure" id="diagramma-flusso" aria-labelledby="flusso-caption">
-          <span class="visual-title">Training offline e scoring in Fabric</span>
-          <p class="lane-label">A / Preparazione offline</p>
-          <ol class="flow-row" aria-label="Percorso di addestramento">
-            <li class="flow-node"><strong>Sequenze normali</strong><small>Esempi di funzionamento della macchina</small></li>
-            <li class="flow-node"><strong>Addestramento</strong><small>Computer locale o Azure Machine Learning</small></li>
-            <li class="flow-node accent"><strong>Registro models</strong><small>Modello ONNX, scaler e soglia</small></li>
+          <ol class="flow-row wide" aria-label="Simulatore, Eventstream, Eventhouse con modello ONNX, rilevamenti, Activator">
+            <li class="flow-node"><strong>Simulatore</strong><small>Dati e difetti di esempio</small></li>
+            <li class="flow-node"><strong>Eventstream</strong><small>Ingresso in Fabric</small></li>
+            <li class="flow-node accent"><strong>Eventhouse</strong><small>Microbatch e modello ONNX</small></li>
+            <li class="flow-node"><strong>anomalies</strong><small>Rilevamenti e dashboard</small></li>
+            <li class="flow-node accent"><strong>Activator</strong><small>Regola &rarr; azione</small></li>
           </ol>
-          <div class="model-transfer"><svg viewBox="0 0 1000 70" preserveAspectRatio="none" aria-hidden="true"><path d="M833 0V16H705V62 M698 54L705 62 712 54"/></svg><span>Modello e metadati alimentano lo scoring</span></div>
-          <p class="lane-label">B / Analisi dei nuovi eventi</p>
-          <ol class="flow-row wide" aria-label="Percorso della telemetria fino alle segnalazioni">
-            <li class="flow-node"><strong>Simulatore</strong><small>Misure delle quattro macchine</small></li>
-            <li class="flow-node"><strong>Eventstream</strong><small>Trasporto degli eventi</small></li>
-            <li class="flow-node"><strong>Finestre KQL</strong><small>Da raw_telemetry, nell&rsquo;Eventhouse</small></li>
-            <li class="flow-node accent"><strong>Scoring ONNX</strong><small>Plugin python() nell&rsquo;Eventhouse</small></li>
-            <li class="flow-node success"><strong>anomalies</strong><small>Consultazione da dashboard e pannello</small></li>
-          </ol>
-          <figcaption id="flusso-caption">Lo scoring riusa il modello addestrato. Solo le finestre che superano soglia e filtro di attivit&agrave; entrano in anomalies.</figcaption>
+          <figcaption id="flusso-caption">L&rsquo;iniezione modifica i dati nel simulatore. Il rilevamento avviene in Fabric, dopo la raccolta del microbatch.</figcaption>
         </figure>
-        <p class="source">Riferimento: <a href="https://learn.microsoft.com/kusto/query/series-decompose-anomalies-function?view=microsoft-fabric">rilevamento nativo con series_decompose_anomalies()</a>.</p>
-      </section>
-
-      <section id="dati" aria-labelledby="titolo-dati">
-        <div class="section-number">02 / Sorgenti</div>
-        <h2 id="titolo-dati">Quattro macchine, tre origini dei dati</h2>
-        <p>Il simulatore cloud genera misure per macchina, sensore e istante. M-003 usa un profilo CNC (controllo numerico) reale, ma il flusso resta sintetico: nessuna connessione diretta a un impianto.</p>
-        <div class="table-wrap" role="region" aria-label="Sorgenti delle quattro macchine" tabindex="0">
-          <table>
-            <caption>Configurazione del simulatore cloud e delle quattro policy KQL</caption>
-            <thead><tr><th scope="col">Macchina</th><th scope="col">Sensori</th><th scope="col">Origine</th><th scope="col">Soglia salvata</th></tr></thead>
-            <tbody>
-              <tr><th scope="row">M-001</th><td>8: temperature, vibrazioni, corrente, giri, pressione e potenza</td><td>Simulazione fisica con stati operativi</td><td class="numeric">2,5</td></tr>
-              <tr><th scope="row">M-002</th><td>3: carico, potenza e coppia del mandrino</td><td>Replay ciclico della traccia sintetica di synthgen</td><td class="numeric">2,3964</td></tr>
-              <tr><th scope="row">M-003</th><td>3: carico, potenza e coppia del mandrino</td><td>Motore statistico basato su un profilo CNC reale</td><td class="numeric">1,9374</td></tr>
-              <tr><th scope="row">M-004</th><td>8, come M-001</td><td>Simulazione fisica con stati operativi</td><td class="numeric">4,0</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p>I sensori CNC sono <code>mandrino_load</code> (%), <code>mandrino_power</code> (kW) e <code>mandrino_torque</code> (N&middot;cm). Le soglie sono specifiche dei modelli, non confrontabili come gravit&agrave; dei guasti.</p>
-        <p><code>synthgen</code> genera la traccia M-002 offline; non partecipa al rilevamento.</p>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/src/simulate_machines.py">simulatore cloud</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/models">artefatti dei modelli</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy per macchina</a>.</p>
-      </section>
-
-      <section id="finestre" aria-labelledby="titolo-finestre">
-        <div class="section-number">03 / Preparazione</div>
-        <h2 id="titolo-finestre">Finestre multivariate di 64 passi</h2>
-        <p>Ogni evento contiene una misura. Esempio illustrativo per M-003:</p>
-        <pre><code>{
-  "machineId": "M-003",
-  "sensorId": "mandrino_power",
-  "ts": "2026-10-03T10:00:00Z",
-  "value": 8.4,
-  "quality": 192
-}</code></pre>
-        <p><code>ts</code> &egrave; in UTC (<code>Z</code>); <code>quality</code> vale 192 per i campioni validi. Eventstream invia gli eventi al database KQL nell&rsquo;Eventhouse di Fabric.</p>
-        <p><code>raw_telemetry</code> conserva una riga per sensore e istante (formato <em>long</em>). Il modello richiede invece una matrice: colonne per sensore, righe per passo temporale.</p>
-        <ol class="sequence">
-          <li>La funzione batch seleziona macchina e sensori del modello, mediando le letture in intervalli di un secondo.</li>
-          <li>Allinea i sensori, aggiunge fino a 63 intervalli precedenti e conserva le finestre complete di 64 passi che terminano nei nuovi dati.</li>
-          <li>Ordina le colonne secondo i metadati: 64 &times; 3 valori per M-003, 64 &times; 8 per M-001 e M-004.</li>
-        </ol>
-        <p>A 1 Hz regolare, una finestra copre circa un minuto. Il codice conta gli intervalli presenti: secondi mancanti allungano la durata; sensori assenti in una riga vengono sostituiti con zero. Dati mancanti e qualit&agrave; richiedono controlli espliciti prima dell&rsquo;uso su un impianto.</p>
-        <figure class="visual-figure" id="diagramma-finestra" aria-labelledby="finestra-caption">
-          <span class="visual-title">M-003: da tre eventi a una riga della finestra</span>
-          <div class="window-figure">
-            <div>
-              <div class="diagram-label">Eventi separati, stesso secondo</div>
-              <div class="event-list">
-                <div class="event-row"><span>00 s</span><span>Carico</span><b>42 %</b></div>
-                <div class="event-row power"><span>00 s</span><span>Potenza</span><b>8,4 kW</b></div>
-                <div class="event-row torque"><span>00 s</span><span>Coppia</span><b>3.200 N&middot;cm</b></div>
-              </div>
-            </div>
-            <span class="diagram-arrow" aria-hidden="true">&rarr;</span>
-            <div>
-              <div class="diagram-label">Sensori allineati, ordine fisso</div>
-              <div class="sample-matrix" role="img" aria-label="Matrice illustrativa: colonne carico, potenza e coppia. Prima riga 42, 8.4, 3200; seconda 43, 8.6, 3280. Si prosegue fino al sessantaquattresimo passo.">
-                <span class="matrix-label">Passo</span><span class="matrix-label">Carico %</span><span class="matrix-label">Pot. kW</span><span class="matrix-label">Coppia N&middot;cm</span>
-                <span class="matrix-label">1</span><span class="load-cell">42</span><span class="power-cell">8,4</span><span class="torque-cell">3.200</span>
-                <span class="matrix-label">2</span><span>43</span><span>8,6</span><span>3.280</span>
-                <span class="matrix-label">&vellip;</span><span>&vellip;</span><span>&vellip;</span><span>&vellip;</span>
-                <span class="matrix-label">64</span><span>41</span><span>8,2</span><span>3.120</span>
-              </div>
-              <div class="window-shape"><strong>64 passi &times; 3 sensori</strong><br>192 valori, poi standardizzati con lo scaler</div>
-            </div>
-          </div>
-          <figcaption id="finestra-caption">Valori illustrativi: ogni riga allinea i sensori dello stesso intervallo; le righe seguono l&rsquo;ordine temporale.</figcaption>
-        </figure>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/01_tables.kql">schema delle tabelle</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/03_scoring_functions.kql">build_multivariate_windows_batch e scorer</a>.</p>
       </section>
 
       <section id="modello" aria-labelledby="titolo-modello">
-        <div class="section-number">04 / Modello</div>
-        <h2 id="titolo-modello">Errore di ricostruzione e score</h2>
-        <p>Lo <em>scaler</em> standardizza ogni sensore usando media e deviazione standard del training, riutilizzate nell&rsquo;inferenza sui nuovi dati. Questo rende confrontabili scale diverse.</p>
-        <p>L&rsquo;<em>autoencoder</em> ricostruisce il proprio ingresso; il <em>Transformer</em> collega i passi temporali tramite attenzione. La differenza tra ingresso e ricostruzione determina lo score. Anche un&rsquo;anomalia pu&ograve; essere ricostruita bene e ottenere uno score basso.</p>
-        <p>I modelli CNC salvati usano <code>maxmean</code>: il sensore con il maggiore errore medio determina lo score.</p>
-        <div class="formula" aria-label="Definizioni della standardizzazione e del punteggio">
-          valore standardizzato = (valore &minus; media) / deviazione standard<br>
-          errore per sensore = media dei 64 errori di ricostruzione al quadrato<br>
-          score = massimo degli errori per sensore
-        </div>
-        <figure class="visual-figure" id="diagramma-autoencoder" aria-labelledby="autoencoder-caption">
-          <span class="visual-title">Ricostruzione e aggregazione maxmean</span>
-          <div class="visual-legend" aria-label="Legenda dei sensori"><span><i aria-hidden="true"></i>Carico</span><span><i class="power-key" aria-hidden="true"></i>Potenza</span><span><i class="torque-key" aria-hidden="true"></i>Coppia</span></div>
-          <ol class="flow-row" aria-label="Trasformazione della finestra attraverso il modello">
-            <li class="flow-node">
-              <strong>Ingresso X</strong><small>Tre sequenze standardizzate</small>
-              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Tre segnali schematici; la potenza contiene un aumento temporaneo.">
-                <path class="axis" d="M5 30H175 M5 63H175 M5 96H175"/>
-                <path class="load-line" d="M5 23L20 22 35 16 50 17 65 21 80 15 95 18 110 14 125 20 140 17 155 22 175 18"/>
-                <path class="power-line" d="M5 57L20 56 35 52 50 53 60 55 60 34 100 34 100 54 110 50 125 55 140 52 155 57 175 53"/>
-                <path class="torque-line" d="M5 91L20 90 35 84 50 85 65 89 80 83 95 86 110 82 125 88 140 85 155 90 175 86"/>
-              </svg>
-            </li>
-            <li class="flow-node accent">
-              <strong>Transformer AE</strong><small>Relazioni fra passi temporali</small>
-              <div class="model-core"><span>Encoder</span><span class="connection" aria-hidden="true">&darr;</span><span>Decoder</span></div>
-              <small>Il decoder usa la rappresentazione dell&rsquo;encoder e query apprese.</small>
-            </li>
-            <li class="flow-node">
-              <strong>Ricostruzione X&#770;</strong><small>La sequenza restituita dal modello</small>
-              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Ricostruzione schematica dei tre segnali; l'aumento della potenza non viene ricostruito.">
-                <path class="axis" d="M5 30H175 M5 63H175 M5 96H175"/>
-                <path class="load-line" d="M5 23L20 22 35 16 50 17 65 21 80 15 95 18 110 14 125 20 140 17 155 22 175 18"/>
-                <path class="power-line" d="M5 57L20 56 35 52 50 53 65 57 80 51 95 54 110 50 125 55 140 52 155 57 175 53"/>
-                <path class="torque-line" d="M5 91L20 90 35 84 50 85 65 89 80 83 95 86 110 82 125 88 140 85 155 90 175 86"/>
-              </svg>
-            </li>
-          </ol>
-          <p class="lane-label" style="margin-top: 1.4rem">Confronto X con X&#770; &rarr; media dell&rsquo;errore al quadrato per sensore</p>
-          <div class="error-reduction" aria-label="Esempio di aggregazione: carico 0, potenza 2.25, coppia 0. Il massimo, e quindi lo score, e 2.25.">
-            <div>Carico<b>0,00</b></div><div class="selected">Potenza<b>2,25</b></div><div>Coppia<b>0,00</b></div><span class="diagram-arrow" aria-hidden="true">&rarr;</span><div class="selected score-total">Massimo = score<b>2,25</b></div>
-          </div>
-          <figcaption id="autoencoder-caption">Schema illustrativo, non output del modello: errore di 3 per 16 campioni sulla potenza, nullo altrove.</figcaption>
-        </figure>
-        <h3>Diluizione degli errori brevi</h3>
-        <p>Un errore di 3 unit&agrave; standardizzate su un sensore, nullo altrove, produce <code>9 / 64 = 0,1406</code> per un campione; per 16 campioni, <code>16 &times; 9 / 64 = 2,25</code>. Solo il secondo supera la soglia M-003 di circa 1,9374.</p>
-        <div class="experiment" id="esperimento">
-          <h3>Una finestra di 64 campioni</h3>
-          <p class="definition">Calcolo illustrativo, senza ONNX: errore costante su un sensore per la durata scelta, nullo altrove. Attivit&agrave; esemplificativa: 1 se attiva, 0,2 se inattiva.</p>
-          <figure>
-            <canvas id="error-chart" class="plot" role="img" aria-label="Errore di ricostruzione illustrativo: 3 unit&agrave; per 16 dei 64 campioni">Errore di 3 unit&agrave; per 16 campioni su 64; score 2,25.</canvas>
-            <figcaption>Errore standardizzato nel tempo, prima del quadrato e della media.</figcaption>
-          </figure>
-          <div class="controls">
-            <div class="control"><label for="residual">Errore <output id="residual-value" for="residual">3,00</output></label><input id="residual" type="range" min="0" max="6" step="0.25" value="3"></div>
-            <div class="control"><label for="duration">Durata in campioni <output id="duration-value" for="duration">16</output></label><input id="duration" type="range" min="1" max="64" step="1" value="16"></div>
-            <div class="control"><label for="threshold">Soglia</label><input id="threshold" type="number" min="0" max="100" step="any" value="1.9374" required></div>
-            <label class="activity-control" for="active"><input id="active" type="checkbox" checked> Macchina attiva</label>
-          </div>
-          <div class="result" id="result" data-state="anomaly" role="status" aria-live="polite" aria-atomic="true">
-            <div><div class="score-label">SCORE</div><output class="score-value" id="score" for="residual duration">2,2500</output></div>
-            <div class="decision"><strong id="decision">Segnalazione</strong><p id="decision-detail">2,2500 &gt; 1,9374 e activity = 1.</p></div>
-          </div>
-          <noscript><p>I controlli richiedono JavaScript. Nell&rsquo;esempio iniziale lo score &egrave; 2,25: supera 1,9374 con macchina attiva.</p></noscript>
-        </div>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">calcolo maxmean ed esportazione</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-003/metadata.json">metadati M-003</a>.</p>
-      </section>
-
-      <section id="training" aria-labelledby="titolo-training">
-        <div class="section-number">05 / Addestramento</div>
-        <h2 id="titolo-training">Training e calibrazione della soglia</h2>
-        <p>Il <em>training</em> modifica i pesi per ricostruire i dati normali; la <em>calibrazione</em> sceglie la soglia di segnalazione senza modificare la rete.</p>
-        <p>Per M-002 e M-003, <code>tools/cnc_ae_lab.py</code> gestisce finestre, training, confronto ed esportazione. Il driver Azure Machine Learning esegue lo stesso laboratorio nel cloud; l&rsquo;inferenza resta in Fabric.</p>
-        <p>Le varianti sono valutate su anomalie sintetiche in dati separati. <em>Precision</em>: quota di segnalazioni corrette; <em>recall</em>: quota di finestre anomale rilevate; <em>F1</em>: loro media armonica. Tutte hanno massimo 1.</p>
+        <div class="section-number">02 / Creazione</div>
+        <h2 id="titolo-modello">Addestrare ed esportare il modello</h2>
+        <p>Il rilevatore &egrave; un <em>Transformer autoencoder</em>, una rete che apprende a ricostruire sequenze di funzionamento normale, considerando insieme pi&ugrave; segnali e la loro evoluzione nel tempo. La differenza fra ingresso e ricostruzione diventa lo <em>score</em>, il punteggio usato per rilevare le anomalie.</p>
         <ol class="sequence">
-          <li><strong>Separazione.</strong> M-002 riserva il 18% finale della traccia a valutazione e calibrazione. M-003 pu&ograve; generare dati dal profilo con un seme diverso.</li>
-          <li><strong>Selezione.</strong> Sei varianti di capacit&agrave; e aggregazione, anche con <em>denoising</em> (ingresso disturbato, ricostruzione pulita). Vince F1 sulle anomalie sintetiche di selezione.</li>
-          <li><strong>Riaddestramento e calibrazione.</strong> Il vincitore usa i dati normali riservati al modello. Soglia: massimo tra l&rsquo;ottimo F1 e il 97&deg; percentile degli score normali della valutazione finale.</li>
-          <li><strong>Esportazione.</strong> Salvataggio di modello, scaler e metadati, misura della dimensione ONNX e confronto numerico con gli score PyTorch.</li>
+          <li><strong>Preparare i dati.</strong> Si formano finestre di 64 passi temporali, con una colonna per segnale. Lo <em>scaler</em> salva media e deviazione standard di ciascun segnale per normalizzarlo allo stesso modo durante training ed esecuzione.</li>
+          <li><strong>Addestrare e scegliere la soglia.</strong> La rete impara dai dati normali. Su dati separati si inseriscono difetti di esempio per confrontare le varianti e scegliere la soglia di rilevamento. Il training pu&ograve; essere eseguito in locale o su Azure Machine Learning.</li>
+          <li><strong>Esportare in ONNX.</strong> ONNX &egrave; un formato portabile che descrive operazioni e pesi del modello. L&rsquo;export include anche il calcolo dello score: nei modelli CNC salvati, la media dell&rsquo;errore al quadrato nel tempo per ciascun segnale, poi il massimo fra queste medie.</li>
         </ol>
-        <p>Il 97&deg; percentile contiene i falsi allarmi intorno al 3% sulle finestre di calibrazione, senza garanzie sui dati futuri. M-001 e M-004, a otto sensori, seguono un training distinto.</p>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">laboratorio CNC</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/cloud-training/submit_cnc_sota.py">driver Azure ML</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">resoconto del training</a>.</p>
+        <p>L&rsquo;esportatore produce un file ONNX con pesi in precisione ridotta FP16, ne controlla la dimensione e confronta i risultati ottenuti dal motore di esecuzione ONNX Runtime con quelli di PyTorch. Il progetto usa un budget di 1 MiB per il modello codificato in Base64, necessario al percorso di caricamento scelto.</p>
+        <p>Con le dipendenze locali installate, questo comando addestra uno dei modelli inclusi e ne salva gli artefatti nella cartella <code>models/transformer_ae_small__M-003/</code>:</p>
+        <pre><code>python tools/cnc_ae_lab.py M-003 --epochs 18 --save</code></pre>
+        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">training ed export</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/cloud-training/submit_cnc_sota.py">esecuzione su Azure ML</a>.</p>
       </section>
 
-      <section id="inferenza" aria-labelledby="titolo-inferenza">
-        <div class="section-number">06 / Esecuzione</div>
-        <h2 id="titolo-inferenza">Scoring ONNX in Fabric</h2>
-        <p><em>ONNX</em> &egrave; un formato portabile per modelli. I pesi FP16 riducono le dimensioni; il file Base64 viene registrato in <code>models</code> con chiave macchina (es. <code>transformer_ae_small__M-003</code>), versione, ordine dei sensori, scaler e soglia.</p>
-        <p>Il percorso inline impone un budget Base64 di 1 MiB: circa 656 KiB per M-003 e 882 KiB per M-002. Modelli pi&ugrave; grandi richiedono un&rsquo;altra modalit&agrave; di distribuzione ed esecuzione.</p>
-        <p>Le quattro <em>update policy</em> trasformano i nuovi batch di <code>raw_telemetry</code> in finestre e invocano <code>python()</code>. Il plugin esegue ONNX Runtime in un ambiente isolato e restituisce gli score.</p>
-        <h3>Filtro di attivit&agrave;</h3>
-        <p>Per limitare falsi allarmi durante le pause, <code>activity</code> &egrave; la mediana dei rapporti validi tra media della finestra e media di training per sensore. Vicino a 1 indica livelli comparabili al training; vicino a zero, misure ridotte. La policy conserva solo le segnalazioni con:</p>
-        <pre><code>activity &gt;= 0.5 and score &gt; threshold</code></pre>
-        <p>Il filtro &egrave; una stima, non uno stato macchina certificato. <code>anomalies</code> registra macchina, estremi della finestra, score e versione, senza attribuire il problema a un sensore. La soglia nei metadati &egrave; ricalibrabile senza riaddestramento.</p>
-        <h3>Latenza di acquisizione e scoring</h3>
-        <p>Il plugin Python nelle update policy richiede acquisizione in coda, non <em>streaming ingestion</em>. Il codice disabilita lo streaming e imposta un batching massimo di un minuto. Si aggiungono completamento della finestra, inferenza e aggiornamento della vista: nessuna latenza istantanea o garanzia end-to-end.</p>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/02_models.kql">registro modelli</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">regole di decisione</a>, <a href="https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric">plugin Python e vincoli di ingestione</a>.</p>
-      </section>
-
-      <section id="verifica" aria-labelledby="titolo-verifica">
-        <div class="section-number">07 / Valutazione</div>
-        <h2 id="titolo-verifica">Metriche offline e rilevamenti live</h2>
-        <p>La demo inserisce perturbazioni controllate: <em>spike</em> (aumento temporaneo), <em>drift</em> (deriva progressiva), <em>stuck</em> (valore fisso). Tempi e destinazione noti permettono il confronto con i rilevamenti.</p>
-        <p>Il pannello Entra ID mostra telemetria e iniezioni; il backend, se abilitato, legge le anomalie Fabric ogni 15 secondi per default. Il Real-Time Dashboard consulta lo stesso database. Questa pagina statica non accede ai servizi.</p>
-        <p>Metriche CNC dai metadati, alla soglia scelta e arrotondate a tre decimali:</p>
-        <div class="table-wrap" role="region" aria-label="Metriche offline salvate nei metadati" tabindex="0">
-          <table id="metrics-table">
-            <caption>Valutazione con anomalie sintetiche, artefatti del training del 5 giugno 2026</caption>
-            <thead><tr><th scope="col">Modello</th><th scope="col">Variante</th><th scope="col" class="numeric">Parametri</th><th scope="col" class="numeric">Precision</th><th scope="col" class="numeric">Recall</th><th scope="col" class="numeric">F1</th></tr></thead>
+      <section id="caricamento" aria-labelledby="titolo-caricamento">
+        <div class="section-number">03 / Caricamento</div>
+        <h2 id="titolo-caricamento">Il modello nella tabella models</h2>
+        <p><strong>Il file ONNX viene caricato nella tabella <code>models</code> del database KQL, dentro l&rsquo;Eventhouse.</strong> Lo script di registrazione legge gli artefatti prodotti dal training e li inserisce in una riga con nome e versione del modello.</p>
+        <figure class="visual-figure" id="diagramma-caricamento" aria-labelledby="caricamento-caption">
+          <ol class="flow-row" aria-label="File di training, script di registrazione, tabella models in Fabric">
+            <li class="flow-node"><strong>File del training</strong><small>model.fp16.onnx<br>scaler.json<br>metadata.json</small></li>
+            <li class="flow-node"><strong>Registrazione</strong><small>05_register_model.py<br>Codifica Base64 e inserimento</small></li>
+            <li class="flow-node accent"><strong>Fabric / Eventhouse</strong><small>Database KQL<br>Tabella models<br>Una riga per versione</small></li>
+          </ol>
+          <figcaption id="caricamento-caption">Il modello e le informazioni per interpretare l&rsquo;ingresso sono conservati insieme nel database che esegue lo scoring.</figcaption>
+        </figure>
+        <div class="table-wrap" role="region" aria-label="Artefatti e campi della tabella models" tabindex="0">
+          <table>
+            <thead><tr><th scope="col">Artefatto</th><th scope="col">Contenuto</th><th scope="col">Destinazione in models</th></tr></thead>
             <tbody>
-              <tr data-machine="M-002"><th scope="row">M-002</th><td>denoise64d</td><td class="numeric">234.275</td><td class="numeric" data-metric="precision_at_thr">0,943</td><td class="numeric" data-metric="recall_at_thr">0,730</td><td class="numeric" data-metric="f1_at_thr">0,823</td></tr>
-              <tr data-machine="M-003"><th scope="row">M-003</th><td>base56</td><td class="numeric">161.419</td><td class="numeric" data-metric="precision_at_thr">0,954</td><td class="numeric" data-metric="recall_at_thr">0,869</td><td class="numeric" data-metric="f1_at_thr">0,910</td></tr>
+              <tr><th scope="row"><code>model.fp16.onnx</code></th><td>Rete e calcolo dello score</td><td><code>payload</code>: byte ONNX codificati in Base64</td></tr>
+              <tr><th scope="row"><code>scaler.json</code></th><td>Ordine dei segnali, media e deviazione standard</td><td><code>sensors</code> e <code>metadata.scaler</code></td></tr>
+              <tr><th scope="row"><code>metadata.json</code></th><td>Nome, finestra, soglia e impostazioni del training</td><td><code>name</code>, <code>window_size</code> e <code>metadata</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p>M-002 perde pi&ugrave; finestre anomale alla soglia scelta per contenere i falsi allarmi. Le metriche contano finestre spesso sovrapposte, non guasti indipendenti. Le sorgenti diverse impediscono di isolare la qualit&agrave; dell&rsquo;architettura.</p>
-        <div class="note"><p><strong>Non &egrave; un test indipendente.</strong> Soglia e metriche usano lo stesso insieme finale, separato dal training dei pesi. La generalizzazione richiede un ulteriore test con soglia gi&agrave; fissata.</p></div>
-        <p>Nel live, l&rsquo;abbinamento &egrave; temporale, con eventuale tolleranza; un&rsquo;iniezione pu&ograve; produrre pi&ugrave; segnalazioni. Precision e recall richiedono di verificare il conteggio di eventi, finestre e casi senza abbinamento.</p>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-002/metadata.json">metriche M-002</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-003/metadata.json">metriche M-003</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/src/fabric_poller.py">lettura delle detections</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/07_classification.kql">classificazione live</a>.</p>
+        <p>Con le tabelle Fabric predisposte e l&rsquo;ambiente locale configurato, questo comando registra uno dei modelli inclusi:</p>
+        <pre><code>python tools/05_register_model.py models/transformer_ae_small__M-003</code></pre>
+        <p>Lo script individua workspace e database dalla configurazione locale. A ogni registrazione incrementa la versione; la funzione KQL <code>latest_model()</code> seleziona la pi&ugrave; recente per quel nome. La soglia resta nei metadati: aggiornarla richiede una nuova registrazione, mantenendo i pesi del modello.</p>
+        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/05_register_model.py">registrazione</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/02_models.kql">schema di models e selezione della versione</a>.</p>
       </section>
 
-      <section id="limiti" aria-labelledby="titolo-limiti">
-        <div class="section-number">08 / Confini della demo</div>
-        <h2 id="titolo-limiti">Limiti prima dell&rsquo;uso su impianto</h2>
-        <h3>Copertura del rilevatore</h3>
-        <p>Errori brevi o segnali bloccati ben ricostruiti possono sfuggire. I metadati M-004 riportano eventi di temperatura e vibrazione non separabili dal rumore con la sola soglia: servono prove con altri score o rilevatori dedicati.</p>
-        <h3>Regimi operativi e qualit&agrave; dei dati</h3>
-        <p>Cambi di materiale, utensile o carico possono aumentare i falsi allarmi; il filtro di attivit&agrave; non verifica l&rsquo;intero regime. Lo scoring non filtra <code>quality</code>: provare campioni invalidi, sensori mancanti, ritardi e duplicati.</p>
-        <h3>Affidabilit&agrave; della catena</h3>
-        <p>Con <code>IsTransactional=false</code>, uno scoring fallito pu&ograve; lasciare dati grezzi senza anomalie. Servono monitoraggio e rielaborazione. Il contesto storico del costruttore batch non garantisce elaborazione esattamente una volta: verificare replay e dati fuori ordine.</p>
-        <h3>Configurazione e servizi attivi</h3>
-        <p>Il KQL definisce quattro policy, inclusa M-004; alcune guide precedenti ne descrivono tre. La vista materializzata wide serve all&rsquo;analisi, non allo scoring automatico, che usa il costruttore batch.</p>
-        <p>Il bootstrap crea pipeline di riaddestramento, Reflex/Activator, modello semantico e report, ma non ne dimostra l&rsquo;operativit&agrave;. Verificare automazione, notifiche Teams/email, collegamenti, autorizzazioni, latenza sotto carico e costi.</p>
-        <p class="source">Sorgenti: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/models/transformer_ae_small__M-004/metadata.json">limiti osservati su M-004</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy correnti</a>, <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/scripts/deploy.ps1">bootstrap degli elementi Fabric</a>.</p>
+      <section id="inferenza" aria-labelledby="titolo-inferenza">
+        <div class="section-number">04 / Esecuzione</div>
+        <h2 id="titolo-inferenza">Dal microbatch al rilevamento</h2>
+        <p>Una <em>update policy</em> &egrave; una regola KQL che esegue una trasformazione quando una tabella riceve dati. Qui collega <code>raw_telemetry</code> alla funzione di scoring e scrive il risultato in <code>anomalies</code>.</p>
+        <p>L&rsquo;ingestione raccoglie i dati in <em>microbatch</em>, piccoli gruppi elaborati insieme, con un tempo massimo di batching configurato di <strong>un minuto</strong>. Questo percorso in coda consente di usare il plugin Python nelle update policy. Al tempo di raccolta si aggiungono la formazione delle finestre e l&rsquo;esecuzione del modello.</p>
+        <ol class="sequence">
+          <li><strong>Costruzione delle finestre.</strong> La funzione KQL allinea i segnali del nuovo batch e aggiunge i campioni precedenti necessari a completare le sequenze richieste dal modello.</li>
+          <li><strong>Caricamento in memoria.</strong> <code>python()</code> riceve le finestre e la riga del modello. Decodifica <code>payload</code> e crea una sessione ONNX Runtime.</li>
+          <li><strong>Calcolo.</strong> I valori vengono normalizzati con lo scaler registrato. ONNX Runtime esegue il modello e restituisce uno score per finestra.</li>
+          <li><strong>Decisione.</strong> KQL confronta lo score con la soglia e applica il filtro di attivit&agrave;, che seleziona le finestre con livello operativo adeguato. Salva i rilevamenti con intervallo temporale e versione del modello.</li>
+        </ol>
+        <p>Per attivare questo percorso si abilita il plugin Python nell&rsquo;Eventhouse/database KQL, si usa un&rsquo;immagine con ONNX Runtime e si applicano gli script KQL delle tabelle, delle funzioni e delle policy.</p>
+        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/01_tables.kql">ingestione</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/03_scoring_functions.kql">scoring</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy</a>. Requisiti: <a href="https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric">plugin Python</a>.</p>
+      </section>
+
+      <section id="azioni" aria-labelledby="titolo-azioni">
+        <div class="section-number">05 / Azioni</div>
+        <h2 id="titolo-azioni">Collegare il rilevamento a una regola</h2>
+        <p>Fabric Activator valuta una query sui rilevamenti e attiva un&rsquo;azione quando la condizione configurata &egrave; soddisfatta. Per esempio: raggruppare le anomalie per macchina e inviare un messaggio Teams quando il conteggio supera una soglia.</p>
+        <p>Nel portale Fabric si crea l&rsquo;alert dalla query KQL o da un riquadro del Real-Time Dashboard. Si impostano frequenza di valutazione, condizione, destinatari e azione: email, Teams, un&rsquo;attivit&agrave; Fabric o un flusso Power Automate. Il pannello della demo permette di inserire il difetto e confrontarlo con i rilevamenti restituiti da Fabric.</p>
+        <p class="source">Configurazione: <a href="https://learn.microsoft.com/fabric/real-time-intelligence/data-activator/activator-alert-queryset">alert Activator da query KQL</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/webapp/README.md">pannello della demo</a>.</p>
+      </section>
+
+      <section id="sintesi" aria-labelledby="titolo-sintesi">
+        <div class="section-number">06 / Dati sintetici</div>
+        <h2 id="titolo-sintesi">Generare nuove sequenze da un campione</h2>
+        <p>Il secondo tema del progetto &egrave; costruire dati sintetici che riproducano il comportamento statistico di un esempio di partenza. Consideriamo un processo con cicli di lavoro e pause: occorre riprodurre sia i valori dei segnali sia il modo in cui cambiano nel tempo.</p>
+        <ol class="sequence">
+          <li><strong>Preparare il campione.</strong> Si allineano i segnali nel tempo, si sceglie la frequenza di campionamento e si separano le fasi operative.</li>
+          <li><strong>Misurare le caratteristiche.</strong> Per ogni fase si studiano media, variabilit&agrave; e distribuzione dei valori; poi durata dei cicli, pause, correlazioni fra segnali e autocorrelazione, cio&egrave; la relazione fra valori consecutivi.</li>
+          <li><strong>Generare nuove sequenze.</strong> Il generatore usa queste caratteristiche per produrre nuovi cicli e valori. Per esempio, l&rsquo;autocorrelazione fa dipendere ogni campione anche dal precedente, conservando la continuit&agrave; temporale.</li>
+          <li><strong>Confrontare le statistiche.</strong> Si misurano sugli output le stesse propriet&agrave; del campione di partenza. Le differenze indicano quali parametri o parti del generatore correggere.</li>
+        </ol>
+        <figure class="visual-figure" id="diagramma-sintesi" aria-labelledby="sintesi-caption">
+          <ol class="flow-row" aria-label="Campione, profilo statistico, nuove sequenze sintetiche">
+            <li class="flow-node"><strong>Campione</strong><small>Cicli e segnali osservati</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Sequenza schematica con tre cicli e pause.">
+                <path class="axis" d="M5 90H175 M5 10V90"/>
+                <path class="load-line" d="M5 84L16 82 22 45 29 31 35 43 43 34 49 44 54 83 67 84 74 41 80 35 87 46 94 33 100 42 106 83 120 84 127 43 133 30 140 42 147 35 153 46 159 84 175 83"/>
+              </svg>
+            </li>
+            <li class="flow-node accent"><strong>Profilo statistico</strong><small>Distribuzioni dei valori<br>Durate e pause<br>Dipendenze fra segnali<br>Continuit&agrave; temporale</small></li>
+            <li class="flow-node"><strong>Dati sintetici</strong><small>Nuovi campioni e cicli</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Nuova sequenza schematica con tre cicli, valori e durate differenti.">
+                <path class="axis" d="M5 90H175 M5 10V90"/>
+                <path class="power-line" d="M5 83L12 85 19 47 25 36 31 44 39 29 47 40 54 82 70 84 77 38 83 45 90 32 97 43 103 35 109 84 122 82 129 46 136 35 143 44 150 31 155 43 162 83 175 84"/>
+              </svg>
+            </li>
+          </ol>
+          <figcaption id="sintesi-caption">Esempio schematico. La somiglianza si valuta sulle distribuzioni, sulle relazioni fra segnali e sulla struttura temporale delle nuove sequenze.</figcaption>
+        </figure>
+        <p>Nel repository, <code>cnc_build_profile.py</code> estrae un profilo per fase con statistiche dei segnali, durate e autocorrelazione; <code>cnc_engine.py</code> lo usa per generare dati. La pipeline <code>synthgen</code> sviluppa un approccio appreso: un modello di transizione genera le fasi, un modello di diffusione condizionato alla fase genera i segnali e un modello temporale assegna gli istanti delle misure. La diffusione impara a trasformare rumore in sequenze simili al campione.</p>
+        <p>Le tracce generate alimentano il training del rilevatore e il simulatore. I difetti controllati vengono aggiunti per verificare la risposta dell&rsquo;intero flusso.</p>
+        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_build_profile.py">estrazione del profilo</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-local/cnc_engine.py">generatore statistico</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/pipeline.py">pipeline synthgen</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/metrics/__init__.py">metriche di confronto</a>.</p>
       </section>
 
       <section id="avvio" aria-labelledby="titolo-avvio">
-        <div class="section-number">09 / Riproduzione</div>
-        <h2 id="titolo-avvio">Ambiente di prova</h2>
-        <p>Requisiti: Git, PowerShell 7+, Python compatibile, capacit&agrave; Fabric attiva, permessi e plugin Python abilitato. Azure Container Apps e Azure Machine Learning servono per simulazione e training cloud; sono disponibili anche percorsi locali.</p>
-        <p>Clonazione locale, senza modifiche cloud:</p>
-        <pre><code>git clone https://github.com/faustinopalma/anomaly-detection-fabric-demo.git
-cd anomaly-detection-fabric-demo</code></pre>
-        <ol class="sequence">
-          <li><strong>Computer.</strong> Seguire il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">runbook</a> per Python e dipendenze. Creare <code>.env</code> da <code>.env.example</code> solo se assente; tenere credenziali e connessioni fuori da Git.</li>
-          <li><strong>Fabric.</strong> Su un workspace di prova autorizzato: bootstrap, collegamento sorgente/destinazione Eventstream, script KQL e plugin secondo il runbook. Questi passaggi modificano l&rsquo;ambiente.</li>
-          <li><strong>Modelli.</strong> Verificare artefatti, macchine, sensori e scaler; registrare i modelli delle quattro policy. Per ricreare i CNC, seguire il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">resoconto del training</a>. Non tutti i dati locali opzionali sono inclusi.</li>
-          <li><strong>Simulazione.</strong> Usare la configurazione del <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/README.md">simulatore cloud</a>; <code>simulator-local</code> &egrave; distinto e non garantisce la stessa flotta. Verificare misure, finestre, anomalie.</li>
-          <li><strong>Prova controllata.</strong> Su M-003 attiva, inserire una perturbazione annotando sensore, intensit&agrave; e intervallo. Dopo acquisizione e scoring, confrontare finestra, segnalazione e versione. Se manca il risultato, distinguere mancata acquisizione, errore di scoring e score sotto soglia.</li>
-        </ol>
-        <p>Fabric, simulatori cloud e training possono generare costi. Arrestare solo le risorse previste dal piano di test. Questa guida non avvia risorse.</p>
-        <div class="note"><p><strong>Tracciabilit&agrave;.</strong> Conservare finestra, scaler, versione e soglia. La causa fisica richiede comunque l&rsquo;esame dell&rsquo;impianto.</p></div>
-      </section>
-
-      <section id="fonti" aria-labelledby="titolo-fonti">
-        <div class="section-number">Riferimenti</div>
-        <h2 id="titolo-fonti">Mappa dei sorgenti</h2>
-        <p>I link seguono <code>main</code>: conservare il commit usato insieme agli artefatti per riprodurre i risultati.</p>
+        <div class="section-number">Avvio</div>
+        <h2 id="titolo-avvio">Eseguire la demo</h2>
+        <p>Il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">runbook</a> descrive dipendenze, credenziali e preparazione del workspace. Servono una capacit&agrave; Fabric attiva, i permessi sul database e un ambiente Python per gli strumenti locali. La capacit&agrave; e gli eventuali servizi cloud di simulazione e training comportano costi di utilizzo.</p>
         <dl class="reading-list">
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/simulator-cloud/src">simulator-cloud/src</a></dt><dd>Generazione, controlli operatore, API e lettura dei rilevamenti Fabric.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/kql">kql</a></dt><dd>Tabelle, registro ONNX, finestre, scoring, policy e correlazione degli eventi.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">tools/cnc_ae_lab.py</a></dt><dd>Training e calibrazione dei modelli CNC; le architetture alternative restano nei notebook.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/models">models</a></dt><dd>Pesi, formati ONNX, scaler, soglie e metriche salvate per macchina.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/webapp/README.md">webapp</a></dt><dd>Pannello operativo con accesso Entra ID, separato dalla documentazione pubblica.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/tree/main/synthgen">synthgen</a></dt><dd>Generazione offline della traccia sintetica; non esegue il rilevamento delle anomalie.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">docs/RUNBOOK.md</a></dt><dd>Sequenza operativa di installazione e collegamento dei componenti.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">Training ed export</a></dt><dd>Comandi per produrre gli artefatti in locale o su Azure ML.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/02_setup_kql_tables.py">Configurazione KQL</a></dt><dd>Applicazione delle tabelle, delle funzioni di scoring e delle update policy.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/README.md">Simulatore</a></dt><dd>Avvio della sorgente di dati e collegamento a Eventstream.</dd></div>
         </dl>
       </section>
       <footer><span>anomaly-detection-fabric-demo &middot; Guida in italiano</span><a href="#contenuto">Torna all&rsquo;inizio</a></footer>
@@ -569,101 +427,10 @@ cd anomaly-detection-fabric-demo</code></pre>
   <script>
     (() => {
       const themeToggle = document.getElementById("dark-theme");
-      const canvas = document.getElementById("error-chart");
-      const residual = document.getElementById("residual");
-      const duration = document.getElementById("duration");
-      const threshold = document.getElementById("threshold");
-      const active = document.getElementById("active");
-      const result = document.getElementById("result");
-      const format = (value, digits) => value.toLocaleString("it-IT", { minimumFractionDigits: digits, maximumFractionDigits: digits });
       themeToggle.checked = document.documentElement.dataset.theme === "dark";
-
-      function drawChart() {
-        const bounds = canvas.getBoundingClientRect();
-        const ratio = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.round(bounds.width * ratio);
-        canvas.height = Math.round(bounds.height * ratio);
-        const context = canvas.getContext("2d");
-        if (!context) return;
-        context.scale(ratio, ratio);
-        const colors = getComputedStyle(document.documentElement);
-        const color = (name) => colors.getPropertyValue(name).trim();
-        const width = bounds.width;
-        const height = bounds.height;
-        const left = 32;
-        const right = width - 12;
-        const top = 24;
-        const bottom = height - 32;
-        const chartWidth = right - left;
-        const chartHeight = bottom - top;
-        const samples = Number(duration.value);
-        const magnitude = Number(residual.value);
-        const start = Math.floor((64 - samples) / 2);
-        const sampleX = (sample) => left + chartWidth * sample / 64;
-        const valueY = (value) => bottom - chartHeight * value / 6;
-        context.fillStyle = color("--cp-surface");
-        context.fillRect(0, 0, width, height);
-        context.fillStyle = color("--cp-accent-soft");
-        context.fillRect(sampleX(start), top, chartWidth * samples / 64, chartHeight);
-        context.font = '12px "Segoe UI", sans-serif';
-        for (const tick of [0, 2, 4, 6]) {
-          context.strokeStyle = color("--cp-border");
-          context.lineWidth = 1;
-          context.beginPath();
-          context.moveTo(left, valueY(tick));
-          context.lineTo(right, valueY(tick));
-          context.stroke();
-          context.fillStyle = color("--cp-text-muted");
-          context.textAlign = "right";
-          context.fillText(String(tick), left - 9, valueY(tick) + 4);
-        }
-        context.strokeStyle = color("--cp-accent");
-        context.lineWidth = 2.5;
-        context.beginPath();
-        context.moveTo(left, bottom);
-        context.lineTo(sampleX(start), bottom);
-        context.lineTo(sampleX(start), valueY(magnitude));
-        context.lineTo(sampleX(start + samples), valueY(magnitude));
-        context.lineTo(sampleX(start + samples), bottom);
-        context.lineTo(right, bottom);
-        context.stroke();
-        context.fillStyle = color("--cp-text-muted");
-        context.textAlign = "left";
-        context.fillText("1", left, height - 10);
-        context.textAlign = "center";
-        context.fillText("Campioni", (left + right) / 2, height - 10);
-        context.textAlign = "right";
-        context.fillText("64", right, height - 10);
-        canvas.setAttribute("aria-label", `Errore illustrativo: ${format(magnitude, 2)} unit\u00e0 per ${samples} dei 64 campioni.`);
-      }
-
-      function updateExample() {
-        const magnitude = Number(residual.value);
-        const samples = Number(duration.value);
-        const score = samples * magnitude * magnitude / 64;
-        const validThreshold = threshold.validity.valid && Number.isFinite(threshold.valueAsNumber);
-        const limit = threshold.valueAsNumber;
-        const state = !validThreshold ? "invalid" : !active.checked ? "excluded" : score > limit ? "anomaly" : "normal";
-        document.getElementById("residual-value").textContent = format(magnitude, 2);
-        document.getElementById("duration-value").textContent = String(samples);
-        document.getElementById("score").textContent = format(score, 4);
-        result.dataset.state = state;
-        const titles = { invalid: "Soglia non valida", excluded: "Finestra esclusa", anomaly: "Segnalazione", normal: "Nessuna segnalazione" };
-        document.getElementById("decision").textContent = titles[state];
-        const detail = state === "invalid" ? "La soglia deve essere un numero tra 0 e 100."
-          : state === "excluded" ? "activity = 0,2: il filtro esclude la finestra, anche con score elevato."
-          : `${format(score, 4)} ${score > limit ? ">" : "\u2264"} ${format(limit, 4)} e activity = 1.`;
-        document.getElementById("decision-detail").textContent = detail;
-        drawChart();
-      }
-
-      for (const control of [residual, duration, threshold, active]) control.addEventListener("input", updateExample);
       themeToggle.addEventListener("change", () => {
         document.documentElement.dataset.theme = themeToggle.checked ? "dark" : "light";
-        drawChart();
       });
-      new ResizeObserver(drawChart).observe(canvas);
-      updateExample();
 
       const navLinks = [...document.querySelectorAll('.sidebar a[href^="#"]')];
       const sections = navLinks.map((link) => document.querySelector(link.getAttribute("href")));

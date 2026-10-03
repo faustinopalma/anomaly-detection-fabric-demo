@@ -1,6 +1,19 @@
 # Plan
 
-Last updated: 2026-10-03 (GitHub Pages guide; documentation only).
+Last updated: 2026-10-04 (model-centered README/site rewrite and publication).
+
+## Model-centered guide rewrite (2026-10-04)
+
+- [x] Run `git pull --ff-only` first; acquired remote rewrite at `09d6b2f`. Preserve existing notebook/data/tool changes.
+- [x] Inspect the current README and ONNX registration path: model bytes, scaler, and metadata are registered in the KQL `models` table.
+- [x] Verify model export, microbatch execution, action wiring, and statistical synthetic-data generation against their owning source files and official Activator documentation.
+- [x] Rewrite README (English) and site (Italian), preserving their existing languages: end-to-end flow, model creation/import/execution, configured actions, statistical synthesis. Remove machine catalogues, repeated caveats, rhetorical questions, metrics, and the peripheral score calculator. Retain three focused diagrams.
+- [x] Validate source claims, 20 unique repository link targets, HTML, diagrams, desktop/mobile layout, theme toggle, and navigation. Browser checks pass at 320/375/768/1440 px; GitHub Markdown render has two tables, one Mermaid block, and both commands. Editor diagnostics and scoped whitespace checks pass.
+- [ ] Commit/push only README, site, and handoff files; verify Pages deployment and served content.
+
+Local hypothesis: explaining the concrete path `model.fp16.onnx` plus scaler/metadata -> KQL `models` -> `python()`/ONNX Runtime -> `anomalies` supplies the missing conceptual center. Validate each transition against export/registration/scoring code. Describe Activator actions as configured rules and statistical fidelity as measured against reference data.
+
+Publication is explicitly authorized. No changes to Fabric/Azure, application code, model artifacts, notebooks, or data.
 
 ## Concise guide and repository navigation (2026-10-03)
 

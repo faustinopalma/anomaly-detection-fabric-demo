@@ -1,6 +1,17 @@
 # Current state
 
-Last updated: 2026-10-03 (guide copy and navigation follow-up).
+Last updated: 2026-10-04 (model-centered rewrite verified locally; publication next).
+
+## Model-centered documentation rewrite (2026-10-04)
+
+- User rejected the current framing and requested simple, direct, economical README and site text. Main topic: end-to-end anomaly detection, especially producing ONNX and loading/running it in Fabric with microbatch ingestion and downstream actions. Second topic: synthesizing data from the statistics of a reference sample.
+- User explicitly requested pull first, then rewrite, commit/push, and verify publication. `git pull --ff-only` advanced main from `f6fe0f6` to `09d6b2f` before other work.
+- Rewrote README in English and site in Italian, preserving their languages. Focus: simulated fault -> Eventstream -> microbatch -> ONNX -> anomalies -> configured Activator action. Explain training/export, the three artifacts, exact storage in `models`, version selection, Python/ONNX Runtime execution, and statistical synthetic-data generation.
+- Removed machine catalogues, native-detection comparisons, model limitations, metric tables, rhetorical headings, and the peripheral score calculator. Site has six conceptual sections plus setup links (about 1,333 visible words), with diagrams for the flow, model registration, and statistical synthesis.
+- Checks passed: 20 unique repository link targets; clean README/HTML diagnostics and scoped whitespace; GitHub Markdown rendering (two tables, one Mermaid diagram, both commands); 320/375/768/1440 px layout; no JavaScript errors; valid anchors/IDs/figure labels; theme and navigation. Mobile header now wraps into two rows so controls remain separate.
+- Screenshots saved only under ignored `_local/guide-20261004-*.png`. An old hidden browser tab blocked automated clicks; a fresh preview resolved that. Markdown renderer uses `<table role="table">` and `<pre lang="mermaid">`, which the checks now account for.
+- Publication is the remaining step; planned commit scope is exactly README, site, and these two handoff files.
+- Scope: README, `site/index.html`, and required handoff files only. Existing modified notebook and untracked CNC data/notebook/diagnostic tools remain untouched. No live Fabric/Azure operations.
 
 ## Guide copy and navigation follow-up (2026-10-03)
 

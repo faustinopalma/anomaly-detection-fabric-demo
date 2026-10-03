@@ -1,213 +1,96 @@
-# anomaly-detection-fabric-demo
+# Anomaly Detection on Microsoft Fabric
 
-**[Read the illustrated guide (Italian) →](https://faustinopalma.github.io/anomaly-detection-fabric-demo/)**
+This project demonstrates an end-to-end anomaly detection flow: simulated machines produce data with injected example faults, Fabric receives the events, a custom ONNX model detects anomalies, and configured Activator rules trigger actions.
 
-## Executive summary
+The central implementation is the model lifecycle: train it, export it to ONNX, load it into a Fabric KQL database, and execute it as new data arrives.
 
-**The goal is to complement Microsoft Fabric's native anomaly detection with custom models for more complex industrial monitoring scenarios.** Some anomalies depend on the relationship between several sensors, how their signals evolve over time, and whether a machine is idle or producing. For example, spindle power and torque may each remain within their usual ranges while their combination is unusual for the workload.
+[Illustrated guide in Italian](https://faustinopalma.github.io/anomaly-detection-fabric-demo/)
 
-This demo implements a machine-specific detection pipeline within Fabric, from incoming telemetry to a dashboard showing detected anomalies. Models learn normal behaviour from examples and flag deviations for investigation. Training runs locally or on Azure Machine Learning; detection runs inside Fabric, without a separate model-serving cluster. The intended benefit is to extend the scenarios covered while keeping data ingestion, detection, and monitoring on the same platform.
+## End-to-end flow
 
-## How this complements native detection
+```mermaid
+flowchart LR
+    Simulator["Simulated machines + injected faults"] --> Eventstream["Fabric Eventstream"]
+    Eventstream --> Raw["Eventhouse: raw_telemetry"]
+    Raw --> Scoring["Microbatch scoring: Python + ONNX Runtime"]
+    Models["KQL models table"] --> Scoring
+    Scoring --> Anomalies["anomalies"]
+    Anomalies --> Dashboard["Real-Time Dashboard"]
+    Anomalies --> Activator["Configured Activator rule"]
+    Activator --> Action["Email / Teams / automation"]
+```
 
-Fabric's native KQL functions, such as [`series_decompose_anomalies()`](https://learn.microsoft.com/en-us/kusto/query/series-decompose-anomalies-function?view=microsoft-fabric), detect deviations in individual time series after accounting for trend and seasonality. They provide a starting point without a custom model to train or maintain. This repository explores a complementary approach when the application needs:
+The simulator sends measurements to an Eventstream custom endpoint. Eventstream writes them to `raw_telemetry` in the Eventhouse's KQL database. Fault injection changes the generated signal, for example with a spike, a gradual drift, or a fixed value.
 
-- **Relationships between sensors:** assess measurements such as load, power, and torque together, including unusual combinations of otherwise plausible values.
-- **Patterns over time:** analyse a sequence of measurements to capture changes in behaviour that a single reading may not reveal.
-- **Machine-specific operating context:** use a dedicated model and detection threshold for each machine, with an activity filter to exclude idle periods outside the model's training conditions.
+Scoring uses *microbatches*: incoming data is collected into small batches before the model runs. The ingestion policy sets a maximum batching time of one minute. This queued-ingestion path supports the Python plugin used by the scoring update policy. Detection latency includes batch collection, window formation, and model execution.
 
-The implemented demo focuses on the custom-model path. It includes controlled anomaly injection and checks for detections, missed events, and false alarms. These tests demonstrate the integration and its behaviour on the evaluated data; they do not establish superiority over native detection or validated diagnosis of real equipment faults. Short spikes and frozen sensor values can still be missed, and unfamiliar operating conditions can produce false alarms.
+## Create the ONNX model
 
-## Demo architecture
+The detector is a Transformer autoencoder: a neural network trained to reconstruct normal sequences of measurements. Its reconstruction error becomes an anomaly score.
 
-The detector is a **Transformer autoencoder**, a model trained to reconstruct normal sequences of sensor readings. A high reconstruction error indicates a possible anomaly. Each machine has its own model, input scaling, and threshold. Models are exported to **ONNX**, a portable model format, and executed in the Fabric KQL database through the `python()` plugin. Thresholds are read from `metadata.threshold` and can be adjusted without retraining.
+1. **Prepare windows.** Group normal data into sequences of 64 time steps, with one column per signal. Fit a scaler that stores each signal's mean and standard deviation so training and inference use the same normalization.
+2. **Train and calibrate.** Train on normal windows, then use separate data with injected faults to compare variants and select a detection threshold. Training can run locally or on Azure Machine Learning.
+3. **Export.** Export the network and score calculation together to ONNX. The saved CNC models average squared reconstruction errors over time for each signal, then take the largest average as the score. The exporter compares ONNX Runtime results with PyTorch results.
 
-| Machine | Model (scoring) | Sensors | Data source |
-| --- | --- | --- | --- |
-| M-001 | `transformer_ae_small__M-001` | 8 (synthetic) | simulator physics |
-| M-002 | `transformer_ae_small__M-002` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | synthgen replay trace |
-| M-003 | `transformer_ae_small__M-003` | 3 (CNC spindle: `mandrino_load`/`power`/`torque`) | recorded real CNC profile |
-| M-004 | — (ingested, not scored) | 8 (synthetic) | simulator physics |
+With the local dependencies installed, this command trains and exports one of the included models:
 
-Pipeline: **cloud simulator** (Azure Container Apps) → **Eventstream** → **Eventhouse** (`raw_telemetry` → per-machine model scoring → `anomalies`) → **Real-Time Dashboard**. Scoring runs on ingested batches through update policies, so detection is near real time rather than instantaneous.
+```powershell
+python tools/cnc_ae_lab.py M-003 --epochs 18 --save
+```
 
-The simulator also serves a **control panel protected by Microsoft Entra ID** to view live telemetry, change machine states, inject anomalies, and compare those injections with detections returned by Fabric. See [webapp/README.md](webapp/README.md).
+The [training laboratory](tools/cnc_ae_lab.py) writes its artifacts under `models/transformer_ae_small__M-003/`. Registration uses these three files:
 
-The table describes the documented demo configuration. The M-004 model is a cloud-versus-local training benchmark; enabling its scoring requires model registration and an update-policy entry. Deployment details are in [docs/architecture.md](docs/architecture.md).
-
-## Documentation
-
-The illustrated guide linked above covers the pipeline, model, and evaluation limits, with diagrams and an interactive score example. Its [self-contained HTML source](site/index.html) also opens locally.
-
-The [Pages workflow](.github/workflows/pages.yml) publishes only `site/`, excluding data, model binaries, local configuration, and session notes. Updates to the page on `main` trigger publication; the workflow can also be run manually. For a fork, first select **Settings > Pages > Build and deployment > Source: GitHub Actions** in that repository.
-
-To show the guide in the repository sidebar, edit **About** (gear icon) and enable **Use your GitHub Pages website**. If that option is unavailable, paste the published URL into **Website**.
-
-For implementation details, follow the guides below.
-
-| Doc | What you get |
+| File | Contents |
 | --- | --- |
-| [`docs/solution.md`](docs/solution.md) | End-to-end implementation and rationale, including alternatives evaluated. |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | **Fresh-machine recipe**: clone → working environment in ~12 sequential steps. Use this when bringing up a new PC or Remote Tunnel. |
-| [`docs/concepts.md`](docs/concepts.md) | Plain-English tour of the architecture and the design choices behind it. |
-| [`docs/architecture.md`](docs/architecture.md) | Deployed pieces of this demo (items, names, post-deploy steps). |
-| [`docs/cnc_sota_training.md`](docs/cnc_sota_training.md) | How the live M-002/M-003 models were trained, the results, and how to recreate the training (local + Azure ML). |
-| [`docs/anomaly_detection_fabric_kql.md`](docs/anomaly_detection_fabric_kql.md) | KQL cookbook: every available path for in-Eventhouse anomaly detection, with code. |
-| [`docs/data_modeling_industrial_measures.md`](docs/data_modeling_industrial_measures.md) | How to shape tables when measurements come in heterogeneously (long vs wide vs hybrid). |
-| [`docs/model_architecture_options.md`](docs/model_architecture_options.md) | Model-family options (AE variants) and the tradeoffs behind the chosen TransformerAE. |
-| [`docs/model_deployment_options.md`](docs/model_deployment_options.md) | Where/how to run the ONNX model (in-KQL, Spark, local) and the deployment tradeoffs. |
-| [`docs/cloud_vs_local_training_comparison.md`](docs/cloud_vs_local_training_comparison.md) | Azure ML GPU vs local CPU training benchmark (M-004). |
-| [`simulator-cloud/README.md`](simulator-cloud/README.md) | Always-on simulator on Azure Container Apps (24/7, no-gap telemetry) + optional Entra-gated control API. |
-| [`webapp/README.md`](webapp/README.md) | Entra ID–gated operator control panel: live state, force-state, anomaly inject, 5-minute live chart. |
-| [`tools/README.md`](tools/README.md) | Local simulator + CLI helpers used to set up Eventstream, run KQL scripts, register models, build the dashboard. |
+| `model.fp16.onnx` | Network weights and score calculation, with reduced-precision weights to keep the file compact. |
+| `scaler.json` | Signal order, means, and standard deviations. |
+| `metadata.json` | Model name, window size, threshold, and training settings. |
 
-## Prerequisites
+The exporter checks that the Base64-encoded model fits the project's 1 MiB inline payload budget. The [training guide](docs/cnc_sota_training.md) gives the local and Azure ML commands.
 
-- Windows / macOS / Linux with [PowerShell 7+](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)
-- Python 3.10+ (for `pip install ms-fabric-cli`)
-- An existing Fabric **capacity** you can assign workspaces to
-- An Entra account with rights on that capacity
-- Tenant admin must have enabled "Users can use Fabric APIs"
-- For the in-KQL ONNX scoring: the `python()` plugin enabled on the
-  Eventhouse (admin toggle)
+## Load and run the model in Fabric
 
-## Setup
+**The model is stored in the `models` table of the KQL database inside the Eventhouse.** The [registration script](tools/05_register_model.py) reads the three files, encodes the ONNX bytes as Base64, and inserts a new versioned row. The model bytes go into `payload`; scaler and threshold go into `metadata`. Window size and signal order have dedicated columns.
 
-> For a complete fresh-machine recipe (clone → live ingestion in ~12
-> sequential steps) see [`docs/RUNBOOK.md`](docs/RUNBOOK.md). The
-> abridged version below covers only the happy path on a machine that
-> already has Python, PowerShell and Azure CLI.
+For example, after training an included model and preparing the Fabric tables:
 
 ```powershell
-# 1. Install the Fabric CLI (once)
-pip install --upgrade ms-fabric-cli
-
-# 2. Configure local secrets
-Copy-Item .env.example .env
-# edit .env and fill in tenant id, capacity name, workspace name, etc.
-
-# 3. Run the bootstrap script
-./scripts/deploy.ps1
+python tools/05_register_model.py models/transformer_ae_small__M-003
 ```
 
-The first run launches a **device-code login** in your browser. The token
-is cached under `~/.config/fab/` (gitignored) so subsequent runs are
-silent until it expires.
+The script resolves the workspace and KQL database from the local environment configuration. Each registration increments the model version; `latest_model()` selects the newest version for a given name.
 
-## Layout
+Execution is connected to ingestion through an *update policy*, a KQL rule that runs a transformation when a source table receives data:
 
-```text
-.
-├── .env.example                          # template; copy to .env (gitignored)
-├── README.md
-├── docs/
-│   ├── solution.md                              # production entry point — start here
-│   ├── concepts.md                              # plain-English tour
-│   ├── architecture.md                          # deployed items + post-deploy steps
-│   ├── cnc_sota_training.md                     # M-002/M-003 training report + how to recreate
-│   ├── anomaly_detection_fabric_kql.md          # KQL cookbook (every option, with code)
-│   ├── data_modeling_industrial_measures.md     # long vs wide vs hybrid table designs
-│   ├── model_architecture_options.md            # AE model-family options + tradeoffs
-│   ├── model_deployment_options.md              # where/how to run the ONNX model
-│   ├── cloud_vs_local_training_comparison.md    # Azure ML GPU vs local CPU benchmark
-│   └── RUNBOOK.md                               # fresh-machine recipe
-├── kql/
-│   ├── 01_tables.kql                     # raw_telemetry, anomalies, batching policy, streaming OFF
-│   ├── 02_models.kql                     # versioned ONNX model registry
-│   ├── 03_scoring_functions.kql          # univariate + multivariate window builders, python(onnx) scorers
-│   ├── 04_update_policy.kql              # per-machine auto-score on ingest (fn_score_demo_M001/M002/M003)
-│   ├── 05_multivariate_mv.kql            # wide materialized view + multivariate scoring helpers
-│   ├── 05_injections.kql                 # injected_anomalies ground-truth table
-│   ├── 06_correlation.kql                # injection↔detection correlation functions
-│   └── 07_classification.kql             # TP/FP/FN classification functions
-├── items/                                # blank scaffold, kept for the only legacy notebook still in use
-│   └── nb_register_kql_scorer.Notebook/      # re-applies kql/*.kql
-├── notebooks/                            # active notebooks (publish via tools/upload_notebook.py)
-│   ├── 01_simulator_dev.ipynb            # physics simulator + offline dataset builder (data/training, data/eval)
-│   ├── 02_train_univariate_ae.ipynb      # per-sensor LSTM AE → univariate_ae__<sensor_id>
-│   ├── 03_train_multivariate_ae.ipynb    # per-machine LSTM AE over wide MV → multivariate_ae__<machine_id>
-│   ├── 04_train_transformer_ae.ipynb     # TransformerAE variant
-│   ├── 05_train_conv_gru_ae.ipynb        # Conv+GRU AE variant
-│   ├── 06_train_transformer_small.ipynb  # small TransformerAE (the live per-machine model)
-│   ├── 07_explore_telemetry.ipynb        # ad-hoc telemetry exploration
-│   ├── 08_simulator_cnc_dev.ipynb        # CNC (M-003) profile + engine development
-│   └── 09_cloud_train_aml.ipynb          # submit Azure ML cloud training jobs
-├── tools/                                # Python helpers (Eventstream wiring, KQL setup, model register, dashboard, anomaly inject, correlate)
-├── simulator-local/                      # run the simulator locally
-├── simulator-cloud/                      # always-on simulator on Azure Container Apps
-├── cloud-training/                       # Azure ML job: generate synthetic data + train + export ONNX
-├── infra/
-│   ├── fabric-capacity.bicep             # Bicep template for a Microsoft.Fabric/capacities resource
-│   └── ml-workspace.bicep                # Bicep template for the Azure ML training workspace
-└── scripts/
-    ├── create-capacity.ps1               # one-shot: create the Fabric capacity (uses infra/fabric-capacity.bicep)
-    ├── deploy.ps1                        # main entrypoint: workspace + items on an existing capacity
-    └── lib/
-        ├── env.ps1                      # .env loader + validation
-        └── fabric.ps1                   # thin idempotent helpers around `fab`
-```
+1. A new batch enters `raw_telemetry`. The policy calls the scoring function associated with the model.
+2. KQL forms complete windows, adding recent history where needed, and reads the model row.
+3. The `python()` plugin decodes `payload`, loads it with ONNX Runtime, and normalizes the windows using the stored scaler.
+4. ONNX Runtime returns a score per window. KQL applies the threshold and activity filter, then writes detections with their model version to `anomalies`.
 
-## What the script creates
+The setup requires the Python plugin enabled for the target Eventhouse/KQL database and an image containing ONNX Runtime. The implementation is in [the model registry](kql/02_models.kql), [scoring functions](kql/03_scoring_functions.kql), and [update policies](kql/04_update_policy.kql).
 
-All items below are **blank container items**. The `nb_register_kql_scorer`
-notebook ships with a starter scaffold from `items/`. The active training
-notebooks (`01_simulator_dev`, `02_train_univariate_ae`,
-`03_train_multivariate_ae`) live under `notebooks/` and are published as
-Fabric Notebook items separately with
-[`tools/upload_notebook.py`](tools/upload_notebook.py); see
-[`docs/architecture.md`](docs/architecture.md) §3 and §4.6.
+## Trigger an action
 
-| Item             | Name (default)            | Type           |
-|------------------|---------------------------|----------------|
-| Workspace        | `anomaly-detection-dev`   | Workspace      |
-| Eventstream      | `es_machines`             | Eventstream    |
-| Eventhouse       | `eh_telemetry`            | Eventhouse     |
-| KQL Database     | `kql_telemetry`           | KQLDatabase    |
-| Lakehouse        | `lh_telemetry`            | Lakehouse      |
-| Environment      | `env_anomaly`             | Environment    |
-| Notebook         | `nb_register_kql_scorer`  | Notebook       |
-| Data Pipeline    | `pl_retrain`              | DataPipeline   |
-| Reflex           | `act_anomaly_alerts`      | Reflex         |
-| Semantic Model   | `sm_anomaly`              | SemanticModel  |
-| Report           | `rpt_anomaly`             | Report         |
+A Fabric Activator rule evaluates a query over `anomalies` and triggers the selected action when its condition is met. An example rule groups detections by machine and sends a Teams message when the count crosses a threshold. Recipients, evaluation frequency, and actions are configured in the Fabric portal. The Real-Time Dashboard and [operator panel](webapp/README.md) show detections alongside the injected faults.
 
-In addition, after running the training notebooks once, two more Notebook
-items appear in the workspace:
+## Generate synthetic data from a reference sample
 
-| Item     | Name (default)                  | Type     |
-|----------|---------------------------------|----------|
-| Notebook | `nb_02_train_univariate_ae`     | Notebook |
-| Notebook | `nb_03_train_multivariate_ae`   | Notebook |
+The project also explores how to generate new sequences that reproduce the statistical behaviour of an existing dataset. Start with a sample containing repeated operating cycles, align its signals, and measure their distributions, relationships, timing, and changes between operating phases.
 
-Item names use underscores throughout because some Fabric item types
-(Eventstream, Reflex, …) reject hyphens. Defaults can be overridden in
-`.env`.
+The [profile builder](tools/cnc_build_profile.py) extracts per-phase means, variability, ranges, cycle durations, pauses, and autocorrelation: the relationship between consecutive values. The [profile-driven generator](simulator-local/cnc_engine.py) samples new cycles from those parameters, with temporal continuity between measurements.
 
-The script is **idempotent**: re-running skips items that already exist.
+The [synthgen pipeline](synthgen/pipeline.py) adds a learned approach: a transition model generates operating phases, a conditional diffusion model generates signal windows for each phase, and a timing model assigns timestamps. Diffusion learns to turn noise into sequences resembling the reference data. Generated and reference data are compared through distributions, correlations, and temporal statistics; the measured differences guide adjustments to the generator. The resulting traces supply training data and simulator input.
 
-## Adding more items
+## Run the demo
 
-Add a line in `scripts/deploy.ps1`, e.g.:
+Follow the [runbook](docs/RUNBOOK.md) for dependencies, credentials, and setup. The sequence is: prepare a Fabric workspace and capacity, connect Eventstream to the KQL database, enable Python, apply the KQL scripts, register the models, start the simulator, and configure the Activator rule. Fabric capacity and optional cloud simulation/training incur usage costs.
 
-```powershell
-New-FabricItem -Workspace $ws -Name 'my_model' -Type MLModel
-```
+| Task | Entry point |
+| --- | --- |
+| Train and export | [tools/cnc_ae_lab.py](tools/cnc_ae_lab.py), [cloud-training/submit_cnc_sota.py](cloud-training/submit_cnc_sota.py) |
+| Register the model | [tools/05_register_model.py](tools/05_register_model.py) |
+| Configure ingestion and scoring | [kql](kql), [tools/02_setup_kql_tables.py](tools/02_setup_kql_tables.py) |
+| Generate synthetic data | [tools/cnc_build_profile.py](tools/cnc_build_profile.py), [synthgen](synthgen) |
+| Run the simulator | [simulator-cloud/README.md](simulator-cloud/README.md) |
 
-To import a notebook / pipeline / semantic model from source, drop a
-`items/<name>.<Type>/` definition folder and call:
-
-```powershell
-Import-FabricItem -Workspace $ws -Path 'items/my_model.SemanticModel'
-```
-
-## CI / non-interactive use
-
-For pipelines, switch authentication to a service principal — set these
-as repo/org secrets (never commit them):
-
-```powershell
-fab auth login `
-  --tenant        $env:FABRIC_TENANT_ID `
-  --client-id     $env:FABRIC_CLIENT_ID `
-  --client-secret $env:FABRIC_CLIENT_SECRET
-```
+The [site source](site/index.html) is a self-contained HTML page. The [Pages workflow](.github/workflows/pages.yml) publishes only `site/` when that directory changes on `main`.
