@@ -1,6 +1,16 @@
 # Current state
 
-Last updated: 2026-10-03 (illustrated GitHub Pages guide published and verified).
+Last updated: 2026-10-03 (guide copy and navigation follow-up).
+
+## Guide copy and navigation follow-up (2026-10-03)
+
+- Shortened the Italian guide from 3,379 to 2,199 visible words (34.9%); removed rhetorical headings and repeated explanations.
+- Preserved diagrams, calculator behaviour, source links, metrics, and technical caveats. Static checks confirmed unchanged CSS/JS/SVG/code examples, controls, numeric cells, IDs, and fragment links; guide whitespace check passed.
+- Moved the existing Pages link to the README opening. Documented About → Use your GitHub Pages website (or Website URL) as the sidebar entry point; repository settings were not changed.
+- README whitespace and existing Pages publication-scope checks passed. Browser MCP is unavailable, so browser verification has not been repeated in this session.
+- Secret scan passed. Primary automated review was unavailable (model registry error); fallback code-review agent found no significant issues. CodeQL skipped documentation-only changes.
+- The existing Pages workflow publishes after merge to `main`; no live deployment is claimed for this revision.
+- Scope: documentation and handoff only; no Fabric/Azure changes.
 
 ## GitHub Pages guide (2026-10-03)
 

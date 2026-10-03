@@ -2,6 +2,12 @@
 
 Last updated: 2026-10-03 (GitHub Pages guide; documentation only).
 
+## Concise guide and repository navigation (2026-10-03)
+
+- [x] Shorten Italian guide copy, remove rhetorical headings and repeated explanations; preserve diagrams, technical qualifications, links, and interactive behaviour.
+- [x] Promote the published guide link to the README opening and check the repository About/Website option.
+- [x] Check the page and links, complete review, and update the handoff. Static checks and fallback code review passed; browser MCP and primary automated review unavailable. CodeQL skipped documentation-only changes. No Fabric/Azure changes.
+
 ## GitHub Pages guide (2026-10-03)
 
 - [x] Read the handoff, README, solution guide, and owning KQL update policy; identify documentation drift (four machine policies in code, three in older prose).

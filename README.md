@@ -1,5 +1,7 @@
 # anomaly-detection-fabric-demo
 
+**[Read the illustrated guide (Italian) →](https://faustinopalma.github.io/anomaly-detection-fabric-demo/)**
+
 ## Executive summary
 
 **The goal is to complement Microsoft Fabric's native anomaly detection with custom models for more complex industrial monitoring scenarios.** Some anomalies depend on the relationship between several sensors, how their signals evolve over time, and whether a machine is idle or producing. For example, spindle power and torque may each remain within their usual ranges while their combination is unusual for the workload.
@@ -35,9 +37,11 @@ The table describes the documented demo configuration. The M-004 model is a clou
 
 ## Documentation
 
-The [illustrated guide in Italian](https://faustinopalma.github.io/anomaly-detection-fabric-demo/) explains the current source configuration, window formation, model reconstruction, and evaluation limits. It includes three responsive diagrams and an interactive score example. The [self-contained HTML source](site/index.html) also opens locally, separately from the operator control panel.
+The illustrated guide linked above covers the pipeline, model, and evaluation limits, with diagrams and an interactive score example. Its [self-contained HTML source](site/index.html) also opens locally.
 
 The [Pages workflow](.github/workflows/pages.yml) publishes only `site/`, excluding data, model binaries, local configuration, and session notes. Updates to the page on `main` trigger publication; the workflow can also be run manually. For a fork, first select **Settings > Pages > Build and deployment > Source: GitHub Actions** in that repository.
+
+To show the guide in the repository sidebar, edit **About** (gear icon) and enable **Use your GitHub Pages website**. If that option is unavailable, paste the published URL into **Website**.
 
 For implementation details, follow the guides below.
 
