@@ -1,6 +1,6 @@
 # Current state
 
-Last updated: 2026-10-04 (model-centered rewrite verified locally; publication next).
+Last updated: 2026-10-04 (model-centered README/site rewrite published and verified).
 
 ## Model-centered documentation rewrite (2026-10-04)
 
@@ -10,7 +10,9 @@ Last updated: 2026-10-04 (model-centered rewrite verified locally; publication n
 - Removed machine catalogues, native-detection comparisons, model limitations, metric tables, rhetorical headings, and the peripheral score calculator. Site has six conceptual sections plus setup links (about 1,333 visible words), with diagrams for the flow, model registration, and statistical synthesis.
 - Checks passed: 20 unique repository link targets; clean README/HTML diagnostics and scoped whitespace; GitHub Markdown rendering (two tables, one Mermaid diagram, both commands); 320/375/768/1440 px layout; no JavaScript errors; valid anchors/IDs/figure labels; theme and navigation. Mobile header now wraps into two rows so controls remain separate.
 - Screenshots saved only under ignored `_local/guide-20261004-*.png`. An old hidden browser tab blocked automated clicks; a fresh preview resolved that. Markdown renderer uses `<table role="table">` and `<pre lang="mermaid">`, which the checks now account for.
-- Publication is the remaining step; planned commit scope is exactly README, site, and these two handoff files.
+- Published content commit `43676e6a4120c931ab43c49fbcd9f6431b3c8970`; GitHub Pages run `37159895596` succeeded. URL: `https://faustinopalma.github.io/anomaly-detection-fabric-demo/`.
+- Verified live HTTP 200 and exact Git-blob equality: HTML `2703e78ea63092de0b326f5123f13961c9f74edd` (38,374 served bytes), README `ee7f08b87cdc81fe8d69a11994d167e59f142b41`. Live browser tests passed for 320/1440 px, all three diagrams, theme, section navigation, training/registration commands, and no JavaScript errors.
+- Completed scope: README, site, and these two handoff files only. Operational code, workflow, models, and live Fabric/Azure settings unchanged.
 - Scope: README, `site/index.html`, and required handoff files only. Existing modified notebook and untracked CNC data/notebook/diagnostic tools remain untouched. No live Fabric/Azure operations.
 
 ## Guide copy and navigation follow-up (2026-10-03)

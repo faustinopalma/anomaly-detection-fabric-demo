@@ -9,7 +9,9 @@ Last updated: 2026-10-04 (model-centered README/site rewrite and publication).
 - [x] Verify model export, microbatch execution, action wiring, and statistical synthetic-data generation against their owning source files and official Activator documentation.
 - [x] Rewrite README (English) and site (Italian), preserving their existing languages: end-to-end flow, model creation/import/execution, configured actions, statistical synthesis. Remove machine catalogues, repeated caveats, rhetorical questions, metrics, and the peripheral score calculator. Retain three focused diagrams.
 - [x] Validate source claims, 20 unique repository link targets, HTML, diagrams, desktop/mobile layout, theme toggle, and navigation. Browser checks pass at 320/375/768/1440 px; GitHub Markdown render has two tables, one Mermaid block, and both commands. Editor diagnostics and scoped whitespace checks pass.
-- [ ] Commit/push only README, site, and handoff files; verify Pages deployment and served content.
+- [x] Commit/push only README, site, and handoff files; verify Pages deployment and served content. Content commit `43676e6`; Pages run `37159895596` succeeded. Served HTML and remote README match their committed Git blobs exactly; live HTTP 200, theme/navigation, diagrams, commands, and 320/1440 px layouts passed.
+
+Published at <https://faustinopalma.github.io/anomaly-detection-fabric-demo/>. No operational code, notebooks, models, data, workflow, or live Fabric/Azure changes.
 
 Local hypothesis: explaining the concrete path `model.fp16.onnx` plus scaler/metadata -> KQL `models` -> `python()`/ONNX Runtime -> `anomalies` supplies the missing conceptual center. Validate each transition against export/registration/scoring code. Describe Activator actions as configured rules and statistical fidelity as measured against reference data.
 
