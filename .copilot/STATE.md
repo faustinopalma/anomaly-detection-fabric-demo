@@ -1,19 +1,20 @@
 # Current state
 
-Last updated: 2026-10-03 (visual guide and GitHub Pages publication authorized).
+Last updated: 2026-10-03 (illustrated GitHub Pages guide published and verified).
 
 ## GitHub Pages guide (2026-10-03)
 
-- Follow-up: user authorized publication and asked for diagrams and illustrations. Adding responsive visuals for data flow, window formation, and model reconstruction, followed by a scoped commit/push and live Pages verification. No Fabric/Azure changes.
+- Follow-up completed: user authorized publication and requested diagrams/illustrations. Added the visuals, committed/pushed the five scoped documentation/configuration files, and verified the live Pages deployment. No Fabric/Azure changes.
 - Three inline diagrams are complete: training versus inference flow, long events to a 64x3 matrix, and Transformer reconstruction with maxmean scoring. Visuals use original HTML/CSS/SVG and require no external runtime assets. Layout checks pass at 320/375/768/1440 px, captions and SVG paths validated, screenshots reviewed.
-- GitHub Pages activated with workflow publishing and enforced HTTPS at `https://faustinopalma.github.io/anomaly-detection-fabric-demo/`. First workflow deployment and live byte/browser verification are next; only five documentation/configuration files will be committed.
+- Published at `https://faustinopalma.github.io/anomaly-detection-fabric-demo/`, with workflow publishing and enforced HTTPS. Content commit `569ea04156f4e7e30494b5e99bf3527da131b1aa`; Actions run `37140210514` completed successfully.
+- Live verification: HTTP 200, all three diagrams, no JavaScript errors, responsive 320/1440 px layouts, light/dark themes, short-event score, strict threshold comparison, and activity filter. Served HTML is exactly Git blob `1c5a5294ab48512bf5a1ae987cd9c0ae4fad768f` (65,727 bytes, SHA-256 `ADD9A145F32DA93FF3E2722766DB85A45D2A4A6E607171D22E59E38B9EA87450`). Working-tree CRLF normalizes to the committed LF bytes; compare deployment against the Git blob, not the raw Windows file hash.
 - User requested repository analysis followed by a clear, step-by-step GitHub Page in Italian, without repetition or rhetoric.
 - Created `site/index.html`: nine-step Italian guide, source links, model metrics, limitations, and an illustrative score calculator; no external runtime dependencies or cloud requests.
 - Created `.github/workflows/pages.yml`, publishing only `site/` on main/manual dispatch, with an explicit one-file/no-symlink check. README documents the required Pages setting and publication steps.
 - Browser checks passed: default score 2.25, single-sample score 0.140625, strict threshold equality, inactive gate, empty threshold, zero/max residuals, theme toggle, and section navigation. No JavaScript errors or external runtime requests.
 - Validated at 320/375/768/1440 px: no page overflow or clipped paragraph/heading/control text. Desktop/light and mobile/dark screenshots reviewed; fixed mobile index numbers wrapping and rechecked at 320/375 px. Canvas has nonuniform rendered pixels.
 - All 21 unique source links exist in Git HEAD; no broken internal anchors or duplicate IDs. Thresholds/window sizes/features and six displayed metrics match saved metadata. Publication directory contains only the self-contained HTML; scoped whitespace checks passed.
-- `site/index.html` and README editor diagnostics are clean. Handoff files retain pre-existing historical Markdown lint findings. The GitHub Actions editor flags the not-yet-created `github-pages` environment; its standard declaration matches GitHub's official workflow, but remote activation/deployment has not been run.
+- `site/index.html` and README editor diagnostics are clean. Handoff files retain pre-existing historical Markdown lint findings. The Actions editor retains a cached environment-name diagnostic; the live `github-pages` environment lookup succeeded and the entire workflow passed, so this is not a deployment failure.
 - Additional findings reflected in the guide: one-minute batching configuration; batch windows rather than the wide MV for automatic scoring; final calibration metrics are not an independent test; M-003 uses a profile-driven generator, not live factory telemetry; bootstrap items do not imply configured notifications.
 - Confirmed drift: README and `docs/solution.md` say M-004 is not scored; `kql/04_update_policy.kql` defines and enables all four machine policies. The page will describe source configuration, not claim a freshly verified live environment.
 - Existing modified notebook and untracked CNC data/notebook/diagnostic tools are outside scope and must be preserved.

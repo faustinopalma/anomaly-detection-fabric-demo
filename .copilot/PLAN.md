@@ -14,9 +14,9 @@ Last updated: 2026-10-03 (GitHub Pages guide; documentation only).
 
 - [x] Add responsive inline diagrams for the data/training paths, long-to-window transformation, and autoencoder reconstruction.
 - [x] Verify illustrations, numeric controls, accessibility labels, source links, and layout on desktop/mobile.
-- [ ] Commit/push only the guide, Pages workflow, README, and handoff files; enable GitHub Pages and verify the deployed HTML.
+- [x] Commit/push only the guide, Pages workflow, README, and handoff files; enable GitHub Pages and verify the deployed HTML.
 
-GitHub Pages enabled using `build_type=workflow`; HTTPS enforced. Repository admin permission confirmed; local HEAD and origin/main aligned before publication. Diagram layout checks pass at 320/375/768/1440 px; desktop and mobile screenshots reviewed. Ready for the scoped commit and deployment verification.
+Published: <https://faustinopalma.github.io/anomaly-detection-fabric-demo/>. Commit `569ea04`; Actions run `37140210514` succeeded. GitHub Pages uses `build_type=workflow` with HTTPS enforced. Live HTTP 200, exact match to committed HTML blob, three diagrams, themes, threshold/activity controls, and 320/1440 px layouts verified. Local diagrams additionally checked at 375/768 px; screenshots reviewed. Only the five documentation/configuration files were published to Git; the Pages artifact contains only `site/index.html`.
 
 User explicitly authorized publication and requested diagrams/illustrations. Keep the static artifact self-contained and limited to `site/index.html`; no notebook/data/tool or Fabric/Azure changes. Check graph labels against the existing scorer and model implementation, then test the responsive layouts in the browser.
 
