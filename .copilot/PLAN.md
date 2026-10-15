@@ -7,7 +7,7 @@ Last updated: 2026-10-15 (English website translation).
 - [x] Pull latest main; preserve unrelated notebook/data/tool changes.
 - [x] Translate all site prose, metadata, diagrams, accessibility labels, and navigation into English; update the README guide label. Preserve anchors, commands, styles, and scripts.
 - [x] Validate English content, links, responsive layout, theme, and navigation. Structural checks, 16 source targets, diagnostics, whitespace, and browser checks at 320/375/768/1440 px passed.
-- [ ] Commit/push only site, README, and handoff files; verify the Pages deployment and live content.
+- [x] Commit/push only site, README, and handoff files; verify the Pages deployment and live content. Commit `fc72184`, run `38766375138`: success, HTTP 200, exact committed HTML match, live mobile/desktop and theme/navigation checks passed.
 
 Local hypothesis: all website copy is owned by the single static HTML file. A browser check of visible text and accessibility labels, with unchanged IDs and scripts, can detect missed translations and layout regressions. No Fabric/Azure changes.
 

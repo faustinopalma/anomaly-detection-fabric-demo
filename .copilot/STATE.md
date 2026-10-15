@@ -1,6 +1,6 @@
 # Current state
 
-Last updated: 2026-10-15 (English website ready for publication).
+Last updated: 2026-10-15 (English website published and verified).
 
 ## English website (2026-10-15)
 
@@ -8,7 +8,7 @@ Last updated: 2026-10-15 (English website ready for publication).
 - Preserved the approved model-centered structure, all IDs/anchors/links, commands, CSS, scripts, and SVG paths. No operational or Fabric/Azure changes.
 - `git pull --ff-only` was already up to date. Existing notebook/data/tool changes remain untouched.
 - Validation passed: unchanged structural elements, English copy/metadata, single-file publication scope, 16 existing source-link targets, clean HTML/README diagnostics, and scoped whitespace. Browser checks passed at 320/375/768/1440 px with three figures, valid anchors, no duplicate IDs, no page/text overflow, no JavaScript errors, and working theme/navigation. Mobile screenshot reviewed.
-- Next: scoped commit/push and verification of Pages deployment and live English content.
+- Published content commit `fc7218417c80344c9394a8d80bf8685b2dfbaf50`; Pages run `38766375138` succeeded. Live HTTP 200 and exact equality with committed HTML verified. Live 320/1440 px checks passed: English language/copy, three figures, no overflow or JavaScript errors, working theme/navigation.
 
 ## Model-centered documentation rewrite (2026-10-04)
 
