@@ -1,9 +1,18 @@
 # Current state
 
-Last updated: 2026-10-04 (model-centered README/site rewrite published and verified).
+Last updated: 2026-10-15 (English website ready for publication).
+
+## English website (2026-10-15)
+
+- Translated all site prose, navigation, metadata, figure captions, diagram labels, accessibility labels, and footer into English; set `lang="en"`. Updated README guide link to remove the Italian-language label.
+- Preserved the approved model-centered structure, all IDs/anchors/links, commands, CSS, scripts, and SVG paths. No operational or Fabric/Azure changes.
+- `git pull --ff-only` was already up to date. Existing notebook/data/tool changes remain untouched.
+- Validation passed: unchanged structural elements, English copy/metadata, single-file publication scope, 16 existing source-link targets, clean HTML/README diagnostics, and scoped whitespace. Browser checks passed at 320/375/768/1440 px with three figures, valid anchors, no duplicate IDs, no page/text overflow, no JavaScript errors, and working theme/navigation. Mobile screenshot reviewed.
+- Next: scoped commit/push and verification of Pages deployment and live English content.
 
 ## Model-centered documentation rewrite (2026-10-04)
 
+- Follow-up: linked the published GitHub Page from the repository home by setting About/Website (`homepage`) to `https://faustinopalma.github.io/anomaly-detection-fabric-demo/`. A fresh GitHub API read confirmed the value; the existing README link remains unchanged.
 - User rejected the current framing and requested simple, direct, economical README and site text. Main topic: end-to-end anomaly detection, especially producing ONNX and loading/running it in Fabric with microbatch ingestion and downstream actions. Second topic: synthesizing data from the statistics of a reference sample.
 - User explicitly requested pull first, then rewrite, commit/push, and verify publication. `git pull --ff-only` advanced main from `f6fe0f6` to `09d6b2f` before other work.
 - Rewrote README in English and site in Italian, preserving their languages. Focus: simulated fault -> Eventstream -> microbatch -> ONNX -> anomalies -> configured Activator action. Explain training/export, the three artifacts, exact storage in `models`, version selection, Python/ONNX Runtime execution, and statistical synthetic-data generation.

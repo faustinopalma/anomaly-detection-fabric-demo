@@ -4,7 +4,7 @@ This project demonstrates an end-to-end anomaly detection flow: simulated machin
 
 The central implementation is the model lifecycle: train it, export it to ONNX, load it into a Fabric KQL database, and execute it as new data arrives.
 
-[Illustrated guide in Italian](https://faustinopalma.github.io/anomaly-detection-fabric-demo/)
+[Illustrated guide](https://faustinopalma.github.io/anomaly-detection-fabric-demo/)
 
 ## End-to-end flow
 

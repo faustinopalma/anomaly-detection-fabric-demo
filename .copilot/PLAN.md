@@ -1,9 +1,19 @@
 # Plan
 
-Last updated: 2026-10-04 (model-centered README/site rewrite and publication).
+Last updated: 2026-10-15 (English website translation).
+
+## English website (2026-10-15)
+
+- [x] Pull latest main; preserve unrelated notebook/data/tool changes.
+- [x] Translate all site prose, metadata, diagrams, accessibility labels, and navigation into English; update the README guide label. Preserve anchors, commands, styles, and scripts.
+- [x] Validate English content, links, responsive layout, theme, and navigation. Structural checks, 16 source targets, diagnostics, whitespace, and browser checks at 320/375/768/1440 px passed.
+- [ ] Commit/push only site, README, and handoff files; verify the Pages deployment and live content.
+
+Local hypothesis: all website copy is owned by the single static HTML file. A browser check of visible text and accessibility labels, with unchanged IDs and scripts, can detect missed translations and layout regressions. No Fabric/Azure changes.
 
 ## Model-centered guide rewrite (2026-10-04)
 
+- [x] Follow-up: set and verify the repository About/Website link to the published GitHub Page; retain the existing README link.
 - [x] Run `git pull --ff-only` first; acquired remote rewrite at `09d6b2f`. Preserve existing notebook/data/tool changes.
 - [x] Inspect the current README and ONNX registration path: model bytes, scaler, and metadata are registered in the KQL `models` table.
 - [x] Verify model export, microbatch execution, action wiring, and statistical synthetic-data generation against their owning source files and official Activator documentation.

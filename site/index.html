@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Anomaly detection end-to-end in Microsoft Fabric: creare un modello ONNX, caricarlo nel database KQL, eseguirlo sui microbatch e attivare azioni. Generazione statistica di dati sintetici.">
+  <meta name="description" content="End-to-end anomaly detection in Microsoft Fabric: create an ONNX model, load it into a KQL database, run it on microbatches, and trigger actions. Statistical generation of synthetic data.">
   <meta name="color-scheme" content="light dark">
-  <title>Anomaly Detection su Microsoft Fabric | Guida al repository</title>
+  <title>Anomaly Detection on Microsoft Fabric | Repository Guide</title>
   <script>
     (() => {
       const param = new URLSearchParams(window.location.search).get("scoutTheme");
@@ -264,164 +264,164 @@
   </style>
 </head>
 <body>
-  <a class="skip" href="#contenuto">Vai al contenuto</a>
+  <a class="skip" href="#contenuto">Skip to content</a>
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="#contenuto"><span>FABRIC</span> / Anomaly Detection</a>
       <div class="top-actions">
         <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo">Repository</a>
-        <label class="theme-control" for="dark-theme"><input id="dark-theme" type="checkbox"> Tema scuro</label>
+        <label class="theme-control" for="dark-theme"><input id="dark-theme" type="checkbox"> Dark theme</label>
       </div>
     </div>
   </header>
   <div class="layout">
-    <nav class="sidebar" aria-label="Indice della guida">
-      <div class="nav-label">Indice</div>
+    <nav class="sidebar" aria-label="Guide contents">
+      <div class="nav-label">Contents</div>
       <ol>
-        <li><a href="#problema"><span>01</span> Il flusso completo</a></li>
-        <li><a href="#modello"><span>02</span> Creare il modello ONNX</a></li>
-        <li><a href="#caricamento"><span>03</span> Caricarlo in Fabric</a></li>
-        <li><a href="#inferenza"><span>04</span> Eseguirlo sui microbatch</a></li>
-        <li><a href="#azioni"><span>05</span> Attivare un&rsquo;azione</a></li>
-        <li><a href="#sintesi"><span>06</span> Generare dati sintetici</a></li>
+        <li><a href="#problema"><span>01</span> The complete flow</a></li>
+        <li><a href="#modello"><span>02</span> Create the ONNX model</a></li>
+        <li><a href="#caricamento"><span>03</span> Load it into Fabric</a></li>
+        <li><a href="#inferenza"><span>04</span> Run it on microbatches</a></li>
+        <li><a href="#azioni"><span>05</span> Trigger an action</a></li>
+        <li><a href="#sintesi"><span>06</span> Generate synthetic data</a></li>
       </ol>
-      <a class="source-link" href="#avvio">Avvio e sorgenti</a>
+      <a class="source-link" href="#avvio">Setup and source code</a>
     </nav>
     <main id="contenuto">
       <header class="intro">
-        <div class="eyebrow">Demo end-to-end / 04 ottobre 2026</div>
-        <h1>Anomaly Detection su Microsoft Fabric</h1>
-        <p class="lead">Dati simulati, difetti controllati, un modello ONNX eseguito in Fabric e azioni attivate dai rilevamenti.</p>
-        <p>Il progetto dimostra il flusso completo di anomaly detection. Il passaggio centrale &egrave; creare un modello custom, caricarlo nel database KQL di Fabric e metterlo in funzione all&rsquo;arrivo dei dati.</p>
+        <div class="eyebrow">End-to-end demo / October 15, 2026</div>
+        <h1>Anomaly Detection on Microsoft Fabric</h1>
+        <p class="lead">Simulated data, controlled faults, an ONNX model running in Fabric, and actions triggered by detections.</p>
+        <p>This project demonstrates the complete anomaly detection flow. The central step is creating a custom model, loading it into a Fabric KQL database, and running it as data arrives.</p>
       </header>
 
       <section id="problema" aria-labelledby="titolo-problema">
-        <div class="section-number">01 / Flusso</div>
-        <h2 id="titolo-problema">Dai dati all&rsquo;azione</h2>
-        <p>Il simulatore genera misure di macchine esemplificative e inserisce difetti controllati: un aumento improvviso, una deriva progressiva o un valore bloccato. I dati entrano in Fabric attraverso un endpoint di Eventstream, che li scrive nella tabella <code>raw_telemetry</code> del database KQL, all&rsquo;interno dell&rsquo;Eventhouse.</p>
-        <p>Il modello analizza sequenze di misure e produce un punteggio di anomalia. I rilevamenti vengono salvati in <code>anomalies</code>, consultati dalla dashboard e usati dalle regole di Fabric Activator per avviare le azioni configurate.</p>
+        <div class="section-number">01 / Flow</div>
+        <h2 id="titolo-problema">From data to action</h2>
+        <p>The simulator generates measurements from illustrative machines and injects controlled faults: a sudden spike, a gradual drift, or a stuck value. Data enters Fabric through an Eventstream endpoint, which writes it to the <code>raw_telemetry</code> table in the Eventhouse's KQL database.</p>
+        <p>The model analyzes sequences of measurements and produces an anomaly score. Detections are saved in <code>anomalies</code>, displayed on the dashboard, and used by Fabric Activator rules to trigger configured actions.</p>
         <figure class="visual-figure" id="diagramma-flusso" aria-labelledby="flusso-caption">
-          <ol class="flow-row wide" aria-label="Simulatore, Eventstream, Eventhouse con modello ONNX, rilevamenti, Activator">
-            <li class="flow-node"><strong>Simulatore</strong><small>Dati e difetti di esempio</small></li>
-            <li class="flow-node"><strong>Eventstream</strong><small>Ingresso in Fabric</small></li>
-            <li class="flow-node accent"><strong>Eventhouse</strong><small>Microbatch e modello ONNX</small></li>
-            <li class="flow-node"><strong>anomalies</strong><small>Rilevamenti e dashboard</small></li>
-            <li class="flow-node accent"><strong>Activator</strong><small>Regola &rarr; azione</small></li>
+          <ol class="flow-row wide" aria-label="Simulator, Eventstream, Eventhouse with ONNX model, detections, Activator">
+            <li class="flow-node"><strong>Simulator</strong><small>Example data and faults</small></li>
+            <li class="flow-node"><strong>Eventstream</strong><small>Ingestion into Fabric</small></li>
+            <li class="flow-node accent"><strong>Eventhouse</strong><small>Microbatches and ONNX model</small></li>
+            <li class="flow-node"><strong>anomalies</strong><small>Detections and dashboard</small></li>
+            <li class="flow-node accent"><strong>Activator</strong><small>Rule &rarr; action</small></li>
           </ol>
-          <figcaption id="flusso-caption">L&rsquo;iniezione modifica i dati nel simulatore. Il rilevamento avviene in Fabric, dopo la raccolta del microbatch.</figcaption>
+          <figcaption id="flusso-caption">Fault injection changes the data in the simulator. Detection takes place in Fabric after the microbatch is collected.</figcaption>
         </figure>
       </section>
 
       <section id="modello" aria-labelledby="titolo-modello">
-        <div class="section-number">02 / Creazione</div>
-        <h2 id="titolo-modello">Addestrare ed esportare il modello</h2>
-        <p>Il rilevatore &egrave; un <em>Transformer autoencoder</em>, una rete che apprende a ricostruire sequenze di funzionamento normale, considerando insieme pi&ugrave; segnali e la loro evoluzione nel tempo. La differenza fra ingresso e ricostruzione diventa lo <em>score</em>, il punteggio usato per rilevare le anomalie.</p>
+        <div class="section-number">02 / Creation</div>
+        <h2 id="titolo-modello">Train and export the model</h2>
+        <p>The detector is a <em>Transformer autoencoder</em>, a neural network that learns to reconstruct normal operating sequences by considering multiple signals together and how they evolve over time. The difference between the input and its reconstruction becomes the <em>score</em> used to detect anomalies.</p>
         <ol class="sequence">
-          <li><strong>Preparare i dati.</strong> Si formano finestre di 64 passi temporali, con una colonna per segnale. Lo <em>scaler</em> salva media e deviazione standard di ciascun segnale per normalizzarlo allo stesso modo durante training ed esecuzione.</li>
-          <li><strong>Addestrare e scegliere la soglia.</strong> La rete impara dai dati normali. Su dati separati si inseriscono difetti di esempio per confrontare le varianti e scegliere la soglia di rilevamento. Il training pu&ograve; essere eseguito in locale o su Azure Machine Learning.</li>
-          <li><strong>Esportare in ONNX.</strong> ONNX &egrave; un formato portabile che descrive operazioni e pesi del modello. L&rsquo;export include anche il calcolo dello score: nei modelli CNC salvati, la media dell&rsquo;errore al quadrato nel tempo per ciascun segnale, poi il massimo fra queste medie.</li>
+          <li><strong>Prepare the data.</strong> Build windows of 64 time steps, with one column per signal. The <em>scaler</em> saves each signal's mean and standard deviation so normalization stays consistent between training and inference.</li>
+          <li><strong>Train and select the threshold.</strong> The network learns from normal data. Example faults are injected into separate data to compare model variants and select the detection threshold. Training can run locally or on Azure Machine Learning.</li>
+          <li><strong>Export to ONNX.</strong> ONNX is a portable format describing the model's operations and weights. The export also includes score calculation: for the saved CNC models, the mean squared error over time for each signal, followed by the maximum of those means.</li>
         </ol>
-        <p>L&rsquo;esportatore produce un file ONNX con pesi in precisione ridotta FP16, ne controlla la dimensione e confronta i risultati ottenuti dal motore di esecuzione ONNX Runtime con quelli di PyTorch. Il progetto usa un budget di 1 MiB per il modello codificato in Base64, necessario al percorso di caricamento scelto.</p>
-        <p>Con le dipendenze locali installate, questo comando addestra uno dei modelli inclusi e ne salva gli artefatti nella cartella <code>models/transformer_ae_small__M-003/</code>:</p>
+        <p>The exporter produces an ONNX file with reduced-precision FP16 weights, checks its size, and compares ONNX Runtime results with PyTorch results. The project uses a 1 MiB budget for the Base64-encoded model to fit the chosen loading path.</p>
+        <p>With local dependencies installed, this command trains one of the included models and saves its artifacts in <code>models/transformer_ae_small__M-003/</code>:</p>
         <pre><code>python tools/cnc_ae_lab.py M-003 --epochs 18 --save</code></pre>
-        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">training ed export</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/cloud-training/submit_cnc_sota.py">esecuzione su Azure ML</a>.</p>
+        <p class="source">Code: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_ae_lab.py">training and export</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/cloud-training/submit_cnc_sota.py">running on Azure ML</a>.</p>
       </section>
 
       <section id="caricamento" aria-labelledby="titolo-caricamento">
-        <div class="section-number">03 / Caricamento</div>
-        <h2 id="titolo-caricamento">Il modello nella tabella models</h2>
-        <p><strong>Il file ONNX viene caricato nella tabella <code>models</code> del database KQL, dentro l&rsquo;Eventhouse.</strong> Lo script di registrazione legge gli artefatti prodotti dal training e li inserisce in una riga con nome e versione del modello.</p>
+        <div class="section-number">03 / Loading</div>
+        <h2 id="titolo-caricamento">The model in the models table</h2>
+        <p><strong>The ONNX file is loaded into the <code>models</code> table in the Eventhouse's KQL database.</strong> The registration script reads the training artifacts and inserts them into a row with the model name and version.</p>
         <figure class="visual-figure" id="diagramma-caricamento" aria-labelledby="caricamento-caption">
-          <ol class="flow-row" aria-label="File di training, script di registrazione, tabella models in Fabric">
-            <li class="flow-node"><strong>File del training</strong><small>model.fp16.onnx<br>scaler.json<br>metadata.json</small></li>
-            <li class="flow-node"><strong>Registrazione</strong><small>05_register_model.py<br>Codifica Base64 e inserimento</small></li>
-            <li class="flow-node accent"><strong>Fabric / Eventhouse</strong><small>Database KQL<br>Tabella models<br>Una riga per versione</small></li>
+          <ol class="flow-row" aria-label="Training files, registration script, models table in Fabric">
+            <li class="flow-node"><strong>Training files</strong><small>model.fp16.onnx<br>scaler.json<br>metadata.json</small></li>
+            <li class="flow-node"><strong>Registration</strong><small>05_register_model.py<br>Base64 encoding and insertion</small></li>
+            <li class="flow-node accent"><strong>Fabric / Eventhouse</strong><small>KQL database<br>models table<br>One row per version</small></li>
           </ol>
-          <figcaption id="caricamento-caption">Il modello e le informazioni per interpretare l&rsquo;ingresso sono conservati insieme nel database che esegue lo scoring.</figcaption>
+          <figcaption id="caricamento-caption">The model and the information needed to interpret its input are stored together in the database that runs scoring.</figcaption>
         </figure>
-        <div class="table-wrap" role="region" aria-label="Artefatti e campi della tabella models" tabindex="0">
+        <div class="table-wrap" role="region" aria-label="Artifacts and fields in the models table" tabindex="0">
           <table>
-            <thead><tr><th scope="col">Artefatto</th><th scope="col">Contenuto</th><th scope="col">Destinazione in models</th></tr></thead>
+            <thead><tr><th scope="col">Artifact</th><th scope="col">Contents</th><th scope="col">Destination in models</th></tr></thead>
             <tbody>
-              <tr><th scope="row"><code>model.fp16.onnx</code></th><td>Rete e calcolo dello score</td><td><code>payload</code>: byte ONNX codificati in Base64</td></tr>
-              <tr><th scope="row"><code>scaler.json</code></th><td>Ordine dei segnali, media e deviazione standard</td><td><code>sensors</code> e <code>metadata.scaler</code></td></tr>
-              <tr><th scope="row"><code>metadata.json</code></th><td>Nome, finestra, soglia e impostazioni del training</td><td><code>name</code>, <code>window_size</code> e <code>metadata</code></td></tr>
+              <tr><th scope="row"><code>model.fp16.onnx</code></th><td>Network and score calculation</td><td><code>payload</code>: Base64-encoded ONNX bytes</td></tr>
+              <tr><th scope="row"><code>scaler.json</code></th><td>Signal order, mean, and standard deviation</td><td><code>sensors</code> and <code>metadata.scaler</code></td></tr>
+              <tr><th scope="row"><code>metadata.json</code></th><td>Name, window, threshold, and training settings</td><td><code>name</code>, <code>window_size</code>, and <code>metadata</code></td></tr>
             </tbody>
           </table>
         </div>
-        <p>Con le tabelle Fabric predisposte e l&rsquo;ambiente locale configurato, questo comando registra uno dei modelli inclusi:</p>
+        <p>With the Fabric tables prepared and the local environment configured, this command registers one of the included models:</p>
         <pre><code>python tools/05_register_model.py models/transformer_ae_small__M-003</code></pre>
-        <p>Lo script individua workspace e database dalla configurazione locale. A ogni registrazione incrementa la versione; la funzione KQL <code>latest_model()</code> seleziona la pi&ugrave; recente per quel nome. La soglia resta nei metadati: aggiornarla richiede una nuova registrazione, mantenendo i pesi del modello.</p>
-        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/05_register_model.py">registrazione</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/02_models.kql">schema di models e selezione della versione</a>.</p>
+        <p>The script resolves the workspace and database from local configuration. Each registration increments the version; the KQL function <code>latest_model()</code> selects the latest version for that name. The threshold is stored in metadata: updating it requires a new registration while keeping the model weights.</p>
+        <p class="source">Code: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/05_register_model.py">registration</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/02_models.kql">models schema and version selection</a>.</p>
       </section>
 
       <section id="inferenza" aria-labelledby="titolo-inferenza">
-        <div class="section-number">04 / Esecuzione</div>
-        <h2 id="titolo-inferenza">Dal microbatch al rilevamento</h2>
-        <p>Una <em>update policy</em> &egrave; una regola KQL che esegue una trasformazione quando una tabella riceve dati. Qui collega <code>raw_telemetry</code> alla funzione di scoring e scrive il risultato in <code>anomalies</code>.</p>
-        <p>L&rsquo;ingestione raccoglie i dati in <em>microbatch</em>, piccoli gruppi elaborati insieme, con un tempo massimo di batching configurato di <strong>un minuto</strong>. Questo percorso in coda consente di usare il plugin Python nelle update policy. Al tempo di raccolta si aggiungono la formazione delle finestre e l&rsquo;esecuzione del modello.</p>
+        <div class="section-number">04 / Execution</div>
+        <h2 id="titolo-inferenza">From microbatch to detection</h2>
+        <p>An <em>update policy</em> is a KQL rule that runs a transformation when a table receives data. Here it connects <code>raw_telemetry</code> to the scoring function and writes the result to <code>anomalies</code>.</p>
+        <p>Ingestion collects data into <em>microbatches</em>, small groups processed together, with a configured maximum batching time of <strong>one minute</strong>. This queued path supports the Python plugin in update policies. Detection latency also includes window formation and model execution.</p>
         <ol class="sequence">
-          <li><strong>Costruzione delle finestre.</strong> La funzione KQL allinea i segnali del nuovo batch e aggiunge i campioni precedenti necessari a completare le sequenze richieste dal modello.</li>
-          <li><strong>Caricamento in memoria.</strong> <code>python()</code> riceve le finestre e la riga del modello. Decodifica <code>payload</code> e crea una sessione ONNX Runtime.</li>
-          <li><strong>Calcolo.</strong> I valori vengono normalizzati con lo scaler registrato. ONNX Runtime esegue il modello e restituisce uno score per finestra.</li>
-          <li><strong>Decisione.</strong> KQL confronta lo score con la soglia e applica il filtro di attivit&agrave;, che seleziona le finestre con livello operativo adeguato. Salva i rilevamenti con intervallo temporale e versione del modello.</li>
+          <li><strong>Build windows.</strong> The KQL function aligns signals in the new batch and adds the preceding samples needed to complete the sequences required by the model.</li>
+          <li><strong>Load into memory.</strong> <code>python()</code> receives the windows and the model row. It decodes <code>payload</code> and creates an ONNX Runtime session.</li>
+          <li><strong>Compute scores.</strong> Values are normalized with the registered scaler. ONNX Runtime runs the model and returns one score per window.</li>
+          <li><strong>Make the decision.</strong> KQL compares the score with the threshold and applies the activity filter, selecting windows with a sufficient operating level. It saves detections with their time interval and model version.</li>
         </ol>
-        <p>Per attivare questo percorso si abilita il plugin Python nell&rsquo;Eventhouse/database KQL, si usa un&rsquo;immagine con ONNX Runtime e si applicano gli script KQL delle tabelle, delle funzioni e delle policy.</p>
-        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/01_tables.kql">ingestione</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/03_scoring_functions.kql">scoring</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policy</a>. Requisiti: <a href="https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric">plugin Python</a>.</p>
+        <p>To enable this path, enable the Python plugin in the Eventhouse/KQL database, use an image with ONNX Runtime, and apply the KQL scripts for tables, functions, and policies.</p>
+        <p class="source">Code: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/01_tables.kql">ingestion</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/03_scoring_functions.kql">scoring</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/kql/04_update_policy.kql">policies</a>. Requirements: <a href="https://learn.microsoft.com/kusto/query/python-plugin?view=microsoft-fabric">Python plugin</a>.</p>
       </section>
 
       <section id="azioni" aria-labelledby="titolo-azioni">
-        <div class="section-number">05 / Azioni</div>
-        <h2 id="titolo-azioni">Collegare il rilevamento a una regola</h2>
-        <p>Fabric Activator valuta una query sui rilevamenti e attiva un&rsquo;azione quando la condizione configurata &egrave; soddisfatta. Per esempio: raggruppare le anomalie per macchina e inviare un messaggio Teams quando il conteggio supera una soglia.</p>
-        <p>Nel portale Fabric si crea l&rsquo;alert dalla query KQL o da un riquadro del Real-Time Dashboard. Si impostano frequenza di valutazione, condizione, destinatari e azione: email, Teams, un&rsquo;attivit&agrave; Fabric o un flusso Power Automate. Il pannello della demo permette di inserire il difetto e confrontarlo con i rilevamenti restituiti da Fabric.</p>
-        <p class="source">Configurazione: <a href="https://learn.microsoft.com/fabric/real-time-intelligence/data-activator/activator-alert-queryset">alert Activator da query KQL</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/webapp/README.md">pannello della demo</a>.</p>
+        <div class="section-number">05 / Actions</div>
+        <h2 id="titolo-azioni">Connect detections to a rule</h2>
+        <p>Fabric Activator evaluates a query over detections and triggers an action when the configured condition is met. For example, group anomalies by machine and send a Teams message when the count exceeds a threshold.</p>
+        <p>In the Fabric portal, create an alert from a KQL query or a Real-Time Dashboard tile. Set the evaluation frequency, condition, recipients, and action: email, Teams, a Fabric activity, or a Power Automate flow. The demo panel lets you inject a fault and compare it with detections returned by Fabric.</p>
+        <p class="source">Setup: <a href="https://learn.microsoft.com/fabric/real-time-intelligence/data-activator/activator-alert-queryset">Activator alerts from KQL queries</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/webapp/README.md">demo panel</a>.</p>
       </section>
 
       <section id="sintesi" aria-labelledby="titolo-sintesi">
-        <div class="section-number">06 / Dati sintetici</div>
-        <h2 id="titolo-sintesi">Generare nuove sequenze da un campione</h2>
-        <p>Il secondo tema del progetto &egrave; costruire dati sintetici che riproducano il comportamento statistico di un esempio di partenza. Consideriamo un processo con cicli di lavoro e pause: occorre riprodurre sia i valori dei segnali sia il modo in cui cambiano nel tempo.</p>
+        <div class="section-number">06 / Synthetic data</div>
+        <h2 id="titolo-sintesi">Generate new sequences from a sample</h2>
+        <p>The project's second topic is creating synthetic data that reproduces the statistical behavior of a reference sample. Consider a process with work cycles and idle periods: both signal values and their changes over time need to be reproduced.</p>
         <ol class="sequence">
-          <li><strong>Preparare il campione.</strong> Si allineano i segnali nel tempo, si sceglie la frequenza di campionamento e si separano le fasi operative.</li>
-          <li><strong>Misurare le caratteristiche.</strong> Per ogni fase si studiano media, variabilit&agrave; e distribuzione dei valori; poi durata dei cicli, pause, correlazioni fra segnali e autocorrelazione, cio&egrave; la relazione fra valori consecutivi.</li>
-          <li><strong>Generare nuove sequenze.</strong> Il generatore usa queste caratteristiche per produrre nuovi cicli e valori. Per esempio, l&rsquo;autocorrelazione fa dipendere ogni campione anche dal precedente, conservando la continuit&agrave; temporale.</li>
-          <li><strong>Confrontare le statistiche.</strong> Si misurano sugli output le stesse propriet&agrave; del campione di partenza. Le differenze indicano quali parametri o parti del generatore correggere.</li>
+          <li><strong>Prepare the sample.</strong> Align signals over time, choose the sampling frequency, and separate operating phases.</li>
+          <li><strong>Measure its characteristics.</strong> For each phase, study the mean, variability, and distribution of values; then cycle durations, idle periods, correlations between signals, and autocorrelation, the relationship between successive values.</li>
+          <li><strong>Generate new sequences.</strong> The generator uses these characteristics to produce new cycles and values. For example, autocorrelation makes each sample depend partly on the preceding one, preserving temporal continuity.</li>
+          <li><strong>Compare statistics.</strong> Measure the same properties in the outputs as in the reference sample. Differences indicate which parameters or parts of the generator need adjustment.</li>
         </ol>
         <figure class="visual-figure" id="diagramma-sintesi" aria-labelledby="sintesi-caption">
-          <ol class="flow-row" aria-label="Campione, profilo statistico, nuove sequenze sintetiche">
-            <li class="flow-node"><strong>Campione</strong><small>Cicli e segnali osservati</small>
-              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Sequenza schematica con tre cicli e pause.">
+          <ol class="flow-row" aria-label="Sample, statistical profile, new synthetic sequences">
+            <li class="flow-node"><strong>Sample</strong><small>Observed cycles and signals</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Illustrative sequence with three cycles and idle periods.">
                 <path class="axis" d="M5 90H175 M5 10V90"/>
                 <path class="load-line" d="M5 84L16 82 22 45 29 31 35 43 43 34 49 44 54 83 67 84 74 41 80 35 87 46 94 33 100 42 106 83 120 84 127 43 133 30 140 42 147 35 153 46 159 84 175 83"/>
               </svg>
             </li>
-            <li class="flow-node accent"><strong>Profilo statistico</strong><small>Distribuzioni dei valori<br>Durate e pause<br>Dipendenze fra segnali<br>Continuit&agrave; temporale</small></li>
-            <li class="flow-node"><strong>Dati sintetici</strong><small>Nuovi campioni e cicli</small>
-              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="Nuova sequenza schematica con tre cicli, valori e durate differenti.">
+            <li class="flow-node accent"><strong>Statistical profile</strong><small>Value distributions<br>Durations and idle periods<br>Dependencies between signals<br>Temporal continuity</small></li>
+            <li class="flow-node"><strong>Synthetic data</strong><small>New samples and cycles</small>
+              <svg class="signal-sketch" viewBox="0 0 180 100" role="img" aria-label="New illustrative sequence with three cycles and different values and durations.">
                 <path class="axis" d="M5 90H175 M5 10V90"/>
                 <path class="power-line" d="M5 83L12 85 19 47 25 36 31 44 39 29 47 40 54 82 70 84 77 38 83 45 90 32 97 43 103 35 109 84 122 82 129 46 136 35 143 44 150 31 155 43 162 83 175 84"/>
               </svg>
             </li>
           </ol>
-          <figcaption id="sintesi-caption">Esempio schematico. La somiglianza si valuta sulle distribuzioni, sulle relazioni fra segnali e sulla struttura temporale delle nuove sequenze.</figcaption>
+          <figcaption id="sintesi-caption">Illustrative example. Similarity is evaluated through distributions, relationships between signals, and the temporal structure of the new sequences.</figcaption>
         </figure>
-        <p>Nel repository, <code>cnc_build_profile.py</code> estrae un profilo per fase con statistiche dei segnali, durate e autocorrelazione; <code>cnc_engine.py</code> lo usa per generare dati. La pipeline <code>synthgen</code> sviluppa un approccio appreso: un modello di transizione genera le fasi, un modello di diffusione condizionato alla fase genera i segnali e un modello temporale assegna gli istanti delle misure. La diffusione impara a trasformare rumore in sequenze simili al campione.</p>
-        <p>Le tracce generate alimentano il training del rilevatore e il simulatore. I difetti controllati vengono aggiunti per verificare la risposta dell&rsquo;intero flusso.</p>
-        <p class="source">Codice: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_build_profile.py">estrazione del profilo</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-local/cnc_engine.py">generatore statistico</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/pipeline.py">pipeline synthgen</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/metrics/__init__.py">metriche di confronto</a>.</p>
+        <p>In the repository, <code>cnc_build_profile.py</code> extracts a phase-specific profile containing signal statistics, durations, and autocorrelation; <code>cnc_engine.py</code> uses it to generate data. The <code>synthgen</code> pipeline develops a learned approach: a transition model generates phases, a phase-conditioned diffusion model generates signals, and a timing model assigns measurement timestamps. Diffusion learns to transform noise into sequences similar to the sample.</p>
+        <p>Generated traces feed detector training and the simulator. Controlled faults are added to test the response of the complete flow.</p>
+        <p class="source">Code: <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/cnc_build_profile.py">profile extraction</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-local/cnc_engine.py">statistical generator</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/pipeline.py">synthgen pipeline</a> &middot; <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/synthgen/metrics/__init__.py">comparison metrics</a>.</p>
       </section>
 
       <section id="avvio" aria-labelledby="titolo-avvio">
-        <div class="section-number">Avvio</div>
-        <h2 id="titolo-avvio">Eseguire la demo</h2>
-        <p>Il <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">runbook</a> descrive dipendenze, credenziali e preparazione del workspace. Servono una capacit&agrave; Fabric attiva, i permessi sul database e un ambiente Python per gli strumenti locali. La capacit&agrave; e gli eventuali servizi cloud di simulazione e training comportano costi di utilizzo.</p>
+        <div class="section-number">Setup</div>
+        <h2 id="titolo-avvio">Run the demo</h2>
+        <p>The <a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/RUNBOOK.md">runbook</a> covers dependencies, credentials, and workspace preparation. You need active Fabric capacity, database permissions, and a Python environment for the local tools. Capacity and any cloud simulation or training services incur usage costs.</p>
         <dl class="reading-list">
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">Training ed export</a></dt><dd>Comandi per produrre gli artefatti in locale o su Azure ML.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/02_setup_kql_tables.py">Configurazione KQL</a></dt><dd>Applicazione delle tabelle, delle funzioni di scoring e delle update policy.</dd></div>
-          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/README.md">Simulatore</a></dt><dd>Avvio della sorgente di dati e collegamento a Eventstream.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/docs/cnc_sota_training.md">Training and export</a></dt><dd>Commands to produce artifacts locally or on Azure ML.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/tools/02_setup_kql_tables.py">KQL setup</a></dt><dd>Apply tables, scoring functions, and update policies.</dd></div>
+          <div><dt><a href="https://github.com/faustinopalma/anomaly-detection-fabric-demo/blob/main/simulator-cloud/README.md">Simulator</a></dt><dd>Start the data source and connect it to Eventstream.</dd></div>
         </dl>
       </section>
-      <footer><span>anomaly-detection-fabric-demo &middot; Guida in italiano</span><a href="#contenuto">Torna all&rsquo;inizio</a></footer>
+      <footer><span>anomaly-detection-fabric-demo &middot; Repository guide</span><a href="#contenuto">Back to top</a></footer>
     </main>
   </div>
   <script>
